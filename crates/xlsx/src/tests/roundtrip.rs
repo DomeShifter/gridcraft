@@ -1999,3 +1999,21 @@ fn remove_personal_information_is_kept_and_honoured() {
     assert_eq!(book.child("workbookPr").and_then(|p| p.attr("filterPrivacy")), None);
     assert!(String::from_utf8(pkg.read("docProps/core.xml").unwrap().unwrap()).unwrap().contains("Jane Example"));
 }
+
+#[test]
+fn a_picture_exactly_in_one_cell_reads_back_as_an_in_cell_picture() {
+    // StarSheets: Google Sheets exports a picture inside a cell as a floating one anchored to the
+    // cell's corner and exactly one row tall; it is read back as an in-cell picture.
+    let mut wb = Workbook::new();
+    let s = Arc::make_mut(&mut wb.sheets[0]);
+    let h = s.row_height(2);
+    let png = b"\x89PNG\r\n\x1a\n0000IHDRfake".to_vec();
+    let at = |a: &str| CellRef::parse(a).unwrap();
+    s.images.push(Image { id: 1, anchor: Anchor { cell: at("B3"), dx: 0.0, dy: 0.0, width: 40.0, height: h, mode: AnchorMode::MoveOnly }, data: png.clone().into(), mime: "image/png".into(), alt: "in".into() });
+    s.images.push(Image { id: 2, anchor: Anchor { cell: at("D3"), dx: 0.0, dy: 0.0, width: 40.0, height: h * 3.0, mode: AnchorMode::MoveOnly }, data: png.into(), mime: "image/png".into(), alt: "over".into() });
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    let sh = &back.sheets[0];
+    assert_eq!(sh.cell_pictures.get(&at("B3")).map(|p| p.alt.as_str()), Some("in"));
+    assert_eq!(sh.images.len(), 1);
+    assert_eq!(sh.images[0].alt, "over");
+}

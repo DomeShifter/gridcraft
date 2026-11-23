@@ -38,6 +38,21 @@ fn ext_px(e: Option<&El>) -> (f32, f32) {
     }
 }
 
+/// The cell a picture sits in, when it is how Google Sheets exports a picture inside a cell
+/// ("Insert image in cell", `IMAGE`): anchored to the cell's top-left corner, exactly one row
+/// tall, no wider than its column, over an empty cell. Read as an in-cell picture, it fits the
+/// cell, follows its alignment and stays under frozen rows like the cell (StarSheets).
+fn google_cell_picture(a: &El, sheet: &Sheet) -> Option<CellRef> {
+    if a.name != "twoCellAnchor" || a.attr("editAs") != Some("oneCell") {
+        return None;
+    }
+    let (from, dx, dy) = marker(a.child("from")?);
+    let (to, _tdx, tdy) = marker(a.child("to")?);
+    let fits = dx == 0.0 && dy == 0.0 && tdy == 0.0 && to.row == from.row + 1 && to.col == from.col;
+    let empty = sheet.cells.get(from).is_none_or(|c| c.value.is_empty() && c.formula.is_none() && c.py.is_none());
+    (fits && empty && !sheet.cell_pictures.contains_key(&from)).then_some(from)
+}
+
 fn read_anchor(a: &El, sheet: &Sheet) -> Option<Anchor> {
     match a.name.as_str() {
         "twoCellAnchor" => {
@@ -167,6 +182,13 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                         continue;
                     };
                     let alt = obj.path(&["nvPicPr", "cNvPr"]).and_then(|c| c.attr("descr")).unwrap_or("").to_string();
+                    let mime = mime_for(&target);
+                    if let Some(at) = google_cell_picture(a, sheet)
+                        && matches!(mime, "image/png" | "image/jpeg")
+                    {
+                        sheet.cell_pictures.insert(at, std::sync::Arc::new(gridcraft_model::CellPicture { data: data.to_vec(), mime: mime.to_string(), alt }));
+                        continue;
+                    }
                     let id = cx.next_object_id();
                     sheet.images.push(Image { id, anchor, data: data.into(), mime: mime_for(&target).to_string(), alt });
                 }

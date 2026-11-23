@@ -240,6 +240,17 @@ fn paint_shape_text(p: &Painter, wb: &Workbook, sp: &gridcraft_engine::model::Sh
     clip.galley(pos, g, color);
 }
 
+/// The pane (frozen or scrolling part of the grid) an object anchored at `a` is drawn in, on
+/// screen: like a cell, an object below or right of the frozen rows and columns scrolls under
+/// them instead of over them (to-do 2 row 10, StarSheets).
+fn object_pane(geo: &Geo, a: &Anchor) -> Rect {
+    let split = pos2(geo.cells.left() + geo.frozen_w, geo.cells.top() + geo.frozen_h);
+    let (scroll_x, scroll_y) = (a.cell.col >= geo.fc, a.cell.row >= geo.fr);
+    let min = pos2(if scroll_x { split.x } else { geo.cells.left() }, if scroll_y { split.y } else { geo.cells.top() });
+    let max = pos2(if scroll_x { geo.cells.right() } else { split.x }, if scroll_y { geo.cells.bottom() } else { split.y });
+    geo.mirror_rect(Rect::from_min_max(min, max))
+}
+
 pub(crate) fn anchor_rect(geo: &Geo, sh: &Sheet, a: &Anchor) -> Rect {
     let x = geo.x(sh, a.cell.col) + a.dx * geo.z;
     let y = geo.y(sh, a.cell.row) + a.dy * geo.z;
@@ -286,6 +297,8 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
     let doc = app.session.active().map_or(0, |d| d.uid);
     for sp in &sh.shapes {
         let r = anchor_rect(geo, sh, &sp.anchor);
+        // Clipped to the pane its cell is in: it slides under frozen rows and columns.
+        let p = &p.with_clip_rect(object_pane(geo, &sp.anchor).intersect(p.clip_rect()));
         if !r.intersects(p.clip_rect()) {
             continue;
         }
@@ -354,6 +367,8 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
     }
     for im in &sh.images {
         let r = anchor_rect(geo, sh, &im.anchor);
+        // Clipped to the pane its cell is in: it slides under frozen rows and columns.
+        let p = &p.with_clip_rect(object_pane(geo, &im.anchor).intersect(p.clip_rect()));
         if !r.intersects(p.clip_rect()) {
             continue;
         }
@@ -367,6 +382,8 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
     }
     for ch in &sh.charts {
         let r = anchor_rect(geo, sh, &ch.anchor);
+        // Clipped to the pane its cell is in: it slides under frozen rows and columns.
+        let p = &p.with_clip_rect(object_pane(geo, &ch.anchor).intersect(p.clip_rect()));
         if !r.intersects(p.clip_rect()) {
             continue;
         }
@@ -385,6 +402,8 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
     let hover = p.ctx().input(|i| i.pointer.hover_pos()).map(|h| geo.mirror_pos(h)).filter(|h| geo.in_cells(*h));
     for c in &sh.controls {
         let r = anchor_rect(geo, sh, &c.anchor);
+        // Clipped to the pane its cell is in: it slides under frozen rows and columns.
+        let p = &p.with_clip_rect(object_pane(geo, &c.anchor).intersect(p.clip_rect()));
         // A slider's value shows beside it while it is dragged.
         if !r.expand(24.0).intersects(p.clip_rect()) {
             continue;
