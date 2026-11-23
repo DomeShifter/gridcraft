@@ -128,11 +128,11 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             orientation
         ),
-        cmd!("home.mergeCenter", "Merge & Center", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| merge(s, p, "center")),
-        cmd!("home.mergeAcross", "Merge Across", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| merge(s, p, "across")),
+        cmd!("home.mergeCenter", "Merge & Center", ["Home", "Alignment"], None, "{range?, moves?}", has_doc, |s, p| merge(s, p, "center")),
+        cmd!("home.mergeAcross", "Merge Across", ["Home", "Alignment"], None, "{range?, moves?}", has_doc, |s, p| merge(s, p, "across")),
         // StarSheets: Google Sheets' "Merge vertically", each column of the selection on its own.
-        cmd!("home.mergeDown", "Merge Vertically", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| merge(s, p, "down")),
-        cmd!("home.mergeCells", "Merge Cells", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| merge(s, p, "cells")),
+        cmd!("home.mergeDown", "Merge Vertically", ["Home", "Alignment"], None, "{range?, moves?}", has_doc, |s, p| merge(s, p, "down")),
+        cmd!("home.mergeCells", "Merge Cells", ["Home", "Alignment"], None, "{range?, moves?}", has_doc, |s, p| merge(s, p, "cells")),
         cmd!("home.unmergeCells", "Unmerge Cells", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| merge(s, p, "unmerge")),
         // Number
         cmd!(
@@ -637,6 +637,17 @@ fn orientation(s: &mut Session, p: &Json) -> Result<Json> {
 fn merge(s: &mut Session, p: &Json, how: &str) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
     let ranges = target_ranges(s, p)?;
+    // StarSheets: `moves: [[from, to], …]` moves a block's lone value into its top-left cell
+    // first, inside this command, so one Undo puts the value back where it was too.
+    if let Some(moves) = p.get("moves").and_then(Json::as_array) {
+        let selection = s.doc()?.selection.clone();
+        for m in moves {
+            if let (Some(from), Some(to)) = (m.get(0).and_then(Json::as_str), m.get(1).and_then(Json::as_str)) {
+                s.execute("range.move", serde_json::json!({"range": from, "to": to, "overwrite": true}))?;
+            }
+        }
+        s.doc_mut()?.selection = selection;
+    }
     let how =
         if how == "center" && s.doc()?.wb.sheet(sheet).is_some_and(|sh| ranges.iter().all(|r| sh.merges.contains(r))) { "unmerge" } else { how };
     edit(s, |cx| {
