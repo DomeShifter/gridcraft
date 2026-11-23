@@ -493,6 +493,19 @@ pub fn font_definitions_with(language: crate::i18n::Language, used: &[String]) -
     font_definitions_impl(language, installed.collect(), true)
 }
 
+static HOST_FACES: std::sync::OnceLock<Vec<(&'static str, &'static [u8])>> = std::sync::OnceLock::new();
+
+/// Lets a host (a web build has no system fonts) supply the face that leads a role's chain:
+/// `("ui", bytes)`, `("ui-bold", …)`, `("cell", …)`, `("cell-bold", …)`, `("cell-italic", …)`,
+/// `("cell-bold-italic", …)`. Call once, before the first frame; later calls are ignored.
+pub fn set_host_faces(faces: Vec<(&'static str, &'static [u8])>) {
+    let _ = HOST_FACES.set(faces);
+}
+
+fn host_face(role: &str) -> Option<&'static [u8]> {
+    HOST_FACES.get()?.iter().find(|(r, _)| *r == role).map(|(_, b)| *b)
+}
+
 /// Builds the role font chains, script fallbacks, installed workbook fonts and optional craft-font faces, drops unparseable data and records which families were bound.
 pub(super) fn font_definitions_impl(
     language: crate::i18n::Language,
@@ -514,7 +527,13 @@ pub(super) fn font_definitions_impl(
     };
     let hack = fonts.font_data.contains_key(HACK).then_some(HACK);
     for role in [UI, UI_BOLD, CELL, CELL_BOLD, CELL_ITALIC, CELL_BOLD_ITALIC, SERIF, MONO, MATH, MATH_ITALIC, MATH_BOLD] {
-        let chain = build_role_chain(&mut fonts, role, &base_prop, &base_mono, &fallback, hack, system);
+        let mut chain = build_role_chain(&mut fonts, role, &base_prop, &base_mono, &fallback, hack, system);
+        // A host's own face for this role leads the chain (`set_host_faces`).
+        if let Some(bytes) = host_face(role) {
+            let key = format!("host-{role}");
+            fonts.font_data.insert(key.clone(), Arc::new(FontData::from_static(bytes)));
+            chain.insert(0, key);
+        }
         fonts.families.insert(FontFamily::Name(role.into()), chain);
         bound.push(role.to_string());
     }
