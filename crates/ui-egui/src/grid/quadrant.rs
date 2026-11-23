@@ -640,6 +640,8 @@ fn paint_borders(q: &mut QuadrantPaint<'_>, looks: &[(CellRef, Rect, Look, Optio
         // Sheets marks a cell whose value is an error with a red top-right corner.
         if t.sheets_marks
             && !sh.show_formulas
+            // A picture in a cell keeps #VALUE! only as a fallback for formulas: not an error.
+            && !sh.cell_pictures.contains_key(c)
             && sh.cell(*c).is_some_and(|cell| matches!(cell.value, gridcraft_engine::core::Value::Error(_)))
         {
             let s = 6.0 * z.max(0.7);
