@@ -766,6 +766,10 @@ fn editor_confirm_keys(ui: &mut egui::Ui, ed: &mut crate::editor::EditState) -> 
         dismiss_completion(i, &mut ed.completion);
         (enter, tab, esc, alt_enter, cmd_enter, ctrl_shift_enter, m.shift)
     });
+    // Sheets: Ctrl+Enter (Cmd+Enter on macOS) breaks the line like Alt+Enter; in Excel it fills
+    // the selection with the entry.
+    let sheets = Tokens::get(ui.ctx()).sheets_formula_bar;
+    let (alt_enter, cmd_enter) = if sheets { (alt_enter || cmd_enter, false) } else { (alt_enter, cmd_enter) };
     if alt_enter {
         let b = ed.text.char_indices().nth(ed.caret).map(|(i, _)| i).unwrap_or(ed.text.len());
         ed.text.insert(b, '\n');

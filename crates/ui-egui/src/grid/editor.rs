@@ -28,7 +28,13 @@ pub(super) fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, s
     };
     let st = wb.styles.get(sh.style_id(cell)).clone();
     let size = st.font.size * 96.0 / 72.0 * geo.z;
-    let font = FontId::new(size, theme::cell_family(&st.font.name, st.font.bold, st.font.italic));
+    // A formula is code, not the cell's text: it shows in the formula bar's plain font (never the
+    // cell's bold, italic or typeface), at the cell's size so it still fits the cell, as in Sheets.
+    let font = if ed.text.trim_start().starts_with('=') {
+        theme::ui_font(size)
+    } else {
+        FontId::new(size, theme::cell_family(&st.font.name, st.font.bold, st.font.italic))
+    };
     let lines = ed.text.lines().count().max(1) as f32 + if ed.text.ends_with('\n') { 1.0 } else { 0.0 };
     // Grows with the text: the in-cell editor shows every line and never scrolls (the formula bar
     // is the one that stops at five lines).
