@@ -174,8 +174,25 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         "advancedFilter" => window.default_height(0.0),
         _ => window,
     };
+    // Google Sheets mode: no title band; the title sits at the top left, large, with ✕ at the
+    // right, as Sheets' dialogs have.
+    let sheets_title = app.ui.sheets_keys;
+    let window = if sheets_title { window.title_bar(false) } else { window };
+    let title_text = app.ui.language.tr(&d.title).to_string();
+    let mut closed_by_x = false;
     let (window, collapsed) = place_window(app, ctx, &mut d, window, window_id);
     let shown = window.show(ctx, |ui| {
+            if sheets_title {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(&title_text).size(22.0));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(egui::Button::new(egui::RichText::new("✕").size(18.0)).frame(false).min_size(vec2(32.0, 32.0))).on_hover_text("Close").clicked() {
+                            closed_by_x = true;
+                        }
+                    });
+                });
+                ui.add_space(8.0);
+            }
             if let Some(key) = &collapsed {
                 let title = d.title.clone();
                 ref_edit(app, ui, &mut d, key, RefLabel::Named(&title), (width - 40.0).min(380.0));
@@ -398,6 +415,9 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         for u in urls {
             open_url(&u);
         }
+    }
+    if closed_by_x {
+        win_open = false;
     }
     if ctx.input(|i| i.key_pressed(Key::Escape)) || !win_open {
         // In Solver Options, Escape (or closing the window) cancels the options only.
