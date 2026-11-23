@@ -266,7 +266,15 @@ pub(super) fn pie(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx, inne
 /// Excel: ring outer radii ≈0.83, 0.92 and 1.0 of the plot radius for series 1, 2 and 3). The hole
 /// size and first slice angle come from the chart; each ring is scaled to its own total.
 pub(super) fn doughnut(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
-    let nser = data.series.len().min(MAX_SERIES);
+    // A series with nothing to draw (text, blanks, zeros) gets no ring: an empty ring would still
+    // take its share of the radius and shrink the rings that are drawn.
+    let drawn: Vec<&SeriesData> = data
+        .series
+        .iter()
+        .filter(|s| s.values.iter().take(MAX_CATS).any(|v| v.is_some_and(|v| v.is_finite() && v != 0.0)))
+        .take(MAX_SERIES)
+        .collect();
+    let nser = drawn.len();
     if nser == 0 {
         return;
     }
@@ -287,10 +295,9 @@ pub(super) fn doughnut(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx)
     // Only rings with a pixel of band are drawn, and the wedge budget is shared across them in
     // drawing order: the innermost ring (the first series) gets its slices first, and the outer
     // rings are capped instead of the series × category product growing without bound.
-    let rings: Vec<(&SeriesData, f32, f32)> = data
-        .series
+    let rings: Vec<(&SeriesData, f32, f32)> = drawn
         .iter()
-        .take(nser)
+        .copied()
         .enumerate()
         .filter_map(|(si, s)| {
             let outer = (r - (nser - 1 - si) as f32 * band).min(r);

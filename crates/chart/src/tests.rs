@@ -186,6 +186,27 @@ fn doughnut_draws_each_series_as_a_ring() {
 }
 
 #[test]
+fn a_doughnut_series_with_nothing_to_draw_takes_no_room() {
+    // A column of text beside the numbers made a second, empty ring that halved the real one.
+    let mut c = chart(ChartKind::Doughnut);
+    // The same title either way (one series would otherwise be titled after itself).
+    c.title = Some("Title".into());
+    c.legend = LegendPos::None;
+    c.data_labels = false;
+    c.hole_size = 25;
+    let mut text = series("Letters", &[0.0, 0.0], [221, 132, 82, 255], ChartKind::Doughnut);
+    text.values = vec![None, None];
+    let d = |series| ChartData { category_levels: vec![], palette: vec![], categories: vec!["A".into(), "B".into()], series };
+    let outer = |d: &ChartData| {
+        render(&c, d, 640.0, 400.0, &ApproxMeasure).iter().filter_map(|p| match p { Prim::Wedge { r_outer, .. } => Some(*r_outer), _ => None }).fold(0.0f32, f32::max)
+    };
+    let one = d(vec![series("Numbers", &[1.0, 2.0], [20, 96, 130, 255], ChartKind::Doughnut)]);
+    let two = d(vec![series("Numbers", &[1.0, 2.0], [20, 96, 130, 255], ChartKind::Doughnut), text]);
+    assert!(outer(&one) > 0.0);
+    assert_eq!(outer(&one), outer(&two));
+}
+
+#[test]
 fn doughnut_with_many_series_still_draws_the_outer_rings() {
     let mut c = chart(ChartKind::Doughnut);
     c.title = None;
