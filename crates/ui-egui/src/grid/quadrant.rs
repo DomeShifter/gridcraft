@@ -291,9 +291,10 @@ fn paint_data_bar(p: &egui::Painter, rect: Rect, frac: f32, rgb: [u8; 3], gradie
     }
 }
 
-/// Where a checkbox cell draws its box: centred, sized with the zoom.
+/// Where a checkbox cell draws its box: centred, sized with the zoom. StarSheets: 17 px at 100%,
+/// half the space above and below it in a 21 px row that the old 13 px box left (to-do 2 row 12).
 pub(crate) fn checkbox_rect(cell: Rect, z: f32) -> Rect {
-    let s = (11.0 * z * 1.2).clamp(8.0, 24.0);
+    let s = (17.0 * z).clamp(8.0, 30.0);
     Rect::from_center_size(cell.center(), vec2(s, s))
 }
 
