@@ -63,8 +63,21 @@ pub(super) fn auto_fill(s: &mut Session, p: &Json) -> Result<Json> {
     if !crate::fill::holds_source_in_corner(src, target) {
         return Err(bad("edit.autoFill", "the target must contain the source in one of its corners"));
     }
+    let keeps_rules = !matches!(mode, crate::fill::FillMode::ValuesOnly);
     edit(s, |cx| {
         crate::fill::fill(cx, sheet, src, target, mode)?;
+        // Google Sheets: data validation travels with the fill handle. A rule that covers every
+        // source cell covers the filled cells too.
+        if keeps_rules {
+            let sh = cx.sheet_mut(sheet)?;
+            for v in &mut sh.validations {
+                let covers = |c: CellRef| v.ranges.iter().any(|r| r.contains(c));
+                let all = (src.start.row..=src.end.row).all(|r| (src.start.col..=src.end.col).all(|c| covers(CellRef::new(r, c))));
+                if all && !v.ranges.iter().any(|r| r.contains(target.start) && r.contains(target.end)) {
+                    v.ranges.push(target);
+                }
+            }
+        }
         *cx.sel = crate::Selection { active: src.start, anchor: src.start, ranges: vec![target.union(&src)] };
         Ok(Json::Null)
     })
