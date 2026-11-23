@@ -526,7 +526,12 @@ fn handle_press(app: &mut SheetApp, input: &InteractionInput<'_>) {
     } else {
         note_selecting_press(app);
         let _ = app.session.run("selection.set", json!({"cell": c.a1()}));
-        if acts && wb.styles.get(sh.style_id(c)).num_fmt.as_str() == "checkbox" {
+        // Only a click on the box itself (with a little slack) toggles it; the rest of the
+        // cell just selects, as in Sheets.
+        if acts
+            && wb.styles.get(sh.style_id(c)).num_fmt.as_str() == "checkbox"
+            && super::quadrant::checkbox_rect(geo.cell_rect(sh, c), geo.z).expand(3.0).contains(p)
+        {
             let _ = app.run("cell.toggleCheckbox", json!({"cell": c.a1()}));
         }
         // A click on a hyperlink's text follows it (like Excel); elsewhere in the cell selects.
