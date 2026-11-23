@@ -5,7 +5,7 @@ use std::io::Cursor;
 use std::sync::{Arc, Mutex, Weak};
 
 use egui::{Color32, Painter, Rect, TextureHandle, pos2, vec2};
-use gridcraft_engine::model::CellPicture;
+use gridcraft_engine::model::{Alignment, CellPicture, HAlign, VAlign};
 
 const MAX_ENCODED: usize = 16 * 1024 * 1024;
 const MAX_PIXELS: u64 = 16_000_000;
@@ -107,17 +107,35 @@ fn decode_format(picture: &CellPicture, format: image::ImageFormat) -> Option<eg
     Some(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw()))
 }
 
+#[cfg(test)]
 fn fitted_rect(cell: Rect, size: [usize; 2]) -> Option<Rect> {
+    fitted_rect_aligned(cell, size, &Alignment { v: VAlign::Center, ..Alignment::default() })
+}
+
+/// The picture fitted inside the cell, placed by the cell's alignment (StarSheets, to-do 2 row 7):
+/// left / right / centre across ("General" stays centred), top / middle / bottom down.
+fn fitted_rect_aligned(cell: Rect, size: [usize; 2], align: &Alignment) -> Option<Rect> {
     if cell.width() <= 0.0 || cell.height() <= 0.0 || size.contains(&0) {
         return None;
     }
     let source = vec2(size[0] as f32, size[1] as f32);
     let scale = (cell.width() / source.x).min(cell.height() / source.y);
-    Some(Rect::from_center_size(cell.center(), source * scale))
+    let fitted = source * scale;
+    let x = match align.h {
+        HAlign::Left => cell.left(),
+        HAlign::Right => cell.right() - fitted.x,
+        _ => cell.center().x - fitted.x / 2.0,
+    };
+    let y = match align.v {
+        VAlign::Top => cell.top(),
+        VAlign::Bottom => cell.bottom() - fitted.y,
+        _ => cell.center().y - fitted.y / 2.0,
+    };
+    Some(Rect::from_min_size(pos2(x, y), fitted))
 }
 
 /// Draws a cached cell picture fitted inside the cell and clipped to it, or paints the picture fallback icon when no texture is available.
-pub(crate) fn paint(painter: &Painter, cell: Rect, picture: &Arc<CellPicture>) {
+pub(crate) fn paint(painter: &Painter, cell: Rect, picture: &Arc<CellPicture>, align: &Alignment) {
     if cell.width() <= 0.0 || cell.height() <= 0.0 || !cell.intersects(painter.clip_rect()) {
         return;
     }
@@ -127,7 +145,7 @@ pub(crate) fn paint(painter: &Painter, cell: Rect, picture: &Arc<CellPicture>) {
     let texture = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).texture(painter.ctx(), picture);
     let painter = painter.with_clip_rect(cell.intersect(painter.clip_rect()));
     if let Some(texture) = texture {
-        if let Some(rect) = fitted_rect(cell, texture.size()) {
+        if let Some(rect) = fitted_rect_aligned(cell, texture.size(), align) {
             painter.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
     } else {
