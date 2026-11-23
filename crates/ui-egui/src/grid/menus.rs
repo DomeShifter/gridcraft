@@ -126,8 +126,9 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
     let Some(at) = app.grid.context_menu else { return };
     let mut close = false;
     let resp = egui::Area::new(egui::Id::unique("cell_context")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| {
+        menu_frame(app, ui).show(ui, |ui| {
             ui.set_min_width(200.0);
+            let width = app.ui.menu_look.map(|l| (l.style)(ui));
             let insert_copied = insert_copied_item(app);
             // On a cell with a link Excel offers to edit, open or remove it (#2120).
             let link =
@@ -150,14 +151,14 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
                     ("Delete cells", "ui:deleteCells"),
                     ("-", ""),
                     ("Create a filter", "data.filter"),
-                    ("Filter by cell value", "ui:filterValue"),
                     ("-", ""),
                     ("Insert link", "ui:insertLink"),
                     ("Comment", "ui:newComment"),
                     ("Insert note", "ui:newNote"),
+                    ("Drop-down", "data.validation"),
                     ("-", ""),
-                    ("Conditional formatting", "home.conditionalFormat"),
-                    ("Data validation", "data.validation"),
+                    ("Conditional formatting", "ui:manageRules"),
+                    ("Filter by cell value", "ui:filterValue"),
                     ("Define named range", "ui:defineName"),
                 ]
             } else { vec![
@@ -208,13 +209,20 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
             let lang = crate::i18n::current(ui.ctx());
             for (label, id) in items {
                 if label == "-" {
-                    ui.separator();
+                    match app.ui.menu_look {
+                        Some(look) => (look.sep)(ui),
+                        None => {
+                            ui.separator();
+                        }
+                    }
                     continue;
                 }
-                if ui.add(egui::Button::new(lang.tr(label)).frame_when_inactive(false).min_size(vec2(190.0, 20.0))).clicked() {
+                let fallback = egui::Button::new(lang.tr(label)).frame_when_inactive(false).min_size(vec2(190.0, 20.0));
+                if menu_entry(app, ui, width, label, fallback).clicked() {
                     close = true;
                     match id {
                         "ui:pasteSpecial" => app.open_dialog("pasteSpecial", json!({})),
+                        "ui:manageRules" => app.open_dialog("manageRules", json!({})),
                         "ui:insertPaste" => app.open_dialog("insertPaste", json!({})),
                         "ui:insertCells" => app.open_dialog("insertCells", json!({})),
                         "ui:deleteCells" => app.open_dialog("deleteCells", json!({})),
@@ -521,10 +529,56 @@ pub(super) fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool)
     let Some((at, rows)) = app.grid.header_menu else { return };
     let mut close = false;
     let response = egui::Area::new(egui::Id::unique("header_menu")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| {
+        menu_frame(app, ui).show(ui, |ui| {
             ui.set_min_width(190.0);
+            let width = app.ui.menu_look.map(|l| (l.style)(ui));
             let insert_copied = insert_copied_item(app);
-            let mut items: Vec<(&str, &str)> = if rows {
+            let sheets = app.ui.sheets_keys;
+            // Google Sheets' header menus (host option `sheets_keys`): order and wording.
+            let mut items: Vec<(&str, &str)> = if sheets && rows {
+                vec![
+                    ("Cut", "edit.cut"),
+                    ("Copy", "edit.copy"),
+                    ("Paste", "edit.paste"),
+                    ("Paste special", "ui:pasteSpecial"),
+                    ("-", ""),
+                    ("Insert row above", "home.insertRows"),
+                    ("Insert row below", "ui:insertBelow"),
+                    ("Delete row", "home.deleteRows"),
+                    ("Clear row", "edit.clearContents"),
+                    ("Hide row", "home.hideRows"),
+                    ("Unhide rows", "home.unhideRows"),
+                    ("Resize the row", "ui:rowHeight"),
+                    ("-", ""),
+                    ("Create a filter", "data.filter"),
+                    ("-", ""),
+                    ("Conditional formatting", "ui:manageRules"),
+                    ("Data validation", "data.validation"),
+                ]
+            } else if sheets {
+                vec![
+                    ("Cut", "edit.cut"),
+                    ("Copy", "edit.copy"),
+                    ("Paste", "edit.paste"),
+                    ("Paste special", "ui:pasteSpecial"),
+                    ("-", ""),
+                    ("Insert column left", "home.insertColumns"),
+                    ("Insert column right", "ui:insertRight"),
+                    ("Delete column", "home.deleteColumns"),
+                    ("Clear column", "edit.clearContents"),
+                    ("Hide column", "home.hideColumns"),
+                    ("Unhide columns", "home.unhideColumns"),
+                    ("Resize the column", "ui:columnWidth"),
+                    ("-", ""),
+                    ("Create a filter", "data.filter"),
+                    ("-", ""),
+                    ("Sort sheet A to Z", "data.sortAscending"),
+                    ("Sort sheet Z to A", "data.sortDescending"),
+                    ("-", ""),
+                    ("Conditional formatting", "ui:manageRules"),
+                    ("Data validation", "data.validation"),
+                ]
+            } else if rows {
                 vec![
                     ("Cut", "edit.cut"),
                     ("Copy", "edit.copy"),
@@ -560,18 +614,28 @@ pub(super) fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool)
                     ("Group", "data.group"),
                 ]
             };
-            if let Some(item) = insert_copied {
+            if !sheets && let Some(item) = insert_copied {
                 items.insert(5, item);
             }
             let lang = crate::i18n::current(ui.ctx());
             for (label, id) in items {
                 if label == "-" {
-                    ui.separator();
+                    match app.ui.menu_look {
+                        Some(look) => (look.sep)(ui),
+                        None => {
+                            ui.separator();
+                        }
+                    }
                     continue;
                 }
-                if ui.add(egui::Button::new(lang.tr(label)).frame_when_inactive(false).min_size(vec2(180.0, 20.0))).clicked() {
+                let fallback = egui::Button::new(lang.tr(label)).frame_when_inactive(false).min_size(vec2(180.0, 20.0));
+                if menu_entry(app, ui, width, label, fallback).clicked() {
                     close = true;
                     match id {
+                        "ui:pasteSpecial" => app.open_dialog("pasteSpecial", json!({})),
+                        "ui:manageRules" => app.open_dialog("manageRules", json!({})),
+                        "ui:insertBelow" => insert_after(app, true),
+                        "ui:insertRight" => insert_after(app, false),
                         "ui:insertPaste" => app.open_dialog("insertPaste", json!({})),
                         "ui:rowHeight" => app.open_dialog("rowHeight", json!({})),
                         "ui:formatCells" => app.open_dialog("formatCells", json!({})),
@@ -609,4 +673,57 @@ fn insert_copied_item(app: &SheetApp) -> Option<(&'static str, &'static str)> {
 pub(super) fn is_checkbox(sh: &Sheet, app: &SheetApp) -> bool {
     let Some(d) = app.session.active() else { return false };
     d.wb.styles.get(sh.style_id(d.selection.active)).num_fmt.as_str() == "checkbox"
+}
+
+/// The frame of the cell and header menus: the host's menu look, or GridCraft's popup.
+fn menu_frame(app: &SheetApp, ui: &egui::Ui) -> egui::Frame {
+    if app.ui.menu_look.is_some() { egui::Frame::menu(ui.style()) } else { egui::Frame::popup(ui.style()) }
+}
+
+/// Google Sheets' wording with the selection's size: "Insert 3 rows above", "Insert 1 column to
+/// the right", "Delete rows 3 - 5". Other labels are returned as they are.
+fn sheets_label(app: &SheetApp, label: &str) -> String {
+    let Some(r) = app.session.active().map(|d| d.selection.current()) else { return label.to_string() };
+    let (nr, nc) = (r.end.row - r.start.row + 1, r.end.col - r.start.col + 1);
+    let s = |n: u32| if n == 1 { "" } else { "s" };
+    match label {
+        "Insert row above" => format!("Insert {nr} row{} above", s(nr)),
+        "Insert row below" => format!("Insert {nr} row{} below", s(nr)),
+        "Insert column left" => format!("Insert {nc} column{} to the left", s(nc)),
+        "Insert column right" => format!("Insert {nc} column{} to the right", s(nc)),
+        "Delete row" if nr > 1 => format!("Delete rows {} - {}", r.start.row + 1, r.end.row + 1),
+        "Delete column" if nc > 1 => format!("Delete columns {} - {}", col_to_letters(r.start.col), col_to_letters(r.end.col)),
+        other => other.to_string(),
+    }
+}
+
+/// The shortcut Sheets shows beside a menu entry.
+fn sheets_keys_for(label: &str) -> &'static str {
+    match label {
+        "Cut" => "Ctrl+X",
+        "Copy" => "Ctrl+C",
+        "Paste" => "Ctrl+V",
+        "Comment" => "Ctrl+Alt+M",
+        _ => "",
+    }
+}
+
+/// One entry of the cell or header menu, in the host's look when it set one.
+fn menu_entry(app: &SheetApp, ui: &mut egui::Ui, width: Option<f32>, label: &str, fallback: egui::Button<'_>) -> egui::Response {
+    match (app.ui.menu_look, width) {
+        (Some(look), Some(w)) => ui.add_sized([w, 32.0], (look.row)(&sheets_label(app, label), sheets_keys_for(label))),
+        _ => ui.add(fallback),
+    }
+}
+
+/// Inserts as many rows below (or columns to the right of) the selection as it spans.
+fn insert_after(app: &mut SheetApp, rows: bool) {
+    let Some(r) = app.session.active().map(|d| d.selection.current()) else { return };
+    if rows {
+        let n = r.end.row - r.start.row + 1;
+        app.run_or_alert("home.insertRows", json!({ "rows": format!("{}:{}", r.end.row + 2, r.end.row + 1 + n) }));
+    } else {
+        let n = r.end.col - r.start.col + 1;
+        app.run_or_alert("home.insertColumns", json!({ "cols": format!("{}:{}", col_to_letters(r.end.col + 1), col_to_letters(r.end.col + n)) }));
+    }
 }

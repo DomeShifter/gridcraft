@@ -81,6 +81,15 @@ pub use services::{Chrome, Inbox, Services};
 pub use state::{NoticeKind, OpenWindow, SaveAnswer, SheetView};
 pub mod desktop_theme;
 
+/// How a host draws the cell and header menus: `style` sets up the menu's `Ui` and returns the
+/// row width, `row` builds a row from its label and shortcut text, `sep` draws a divider.
+#[derive(Clone, Copy, Debug)]
+pub struct MenuLook {
+    pub style: fn(&mut egui::Ui) -> f32,
+    pub row: fn(&str, &str) -> egui::Button<'static>,
+    pub sep: fn(&mut egui::Ui),
+}
+
 /// Persisted UI preferences.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -102,6 +111,10 @@ pub struct UiState {
     /// Set by a host; not persisted.
     #[serde(skip)]
     pub sheets_keys: bool,
+    /// A host's own look for the cell and header menus (StarSheets: Google Sheets' rows with
+    /// icons and shortcuts). Set by a host; not persisted.
+    #[serde(skip)]
+    pub menu_look: Option<MenuLook>,
     /// Enable AutoComplete for cell values (File ▸ Options ▸ Editing): typed text is completed
     /// from the one matching entry in the same column.
     pub autocomplete: bool,
@@ -159,6 +172,7 @@ impl Default for UiState {
             status_bar: true,
             animations: true,
             sheets_keys: false,
+            menu_look: None,
             autocomplete: true,
             highlight_active_row: false,
             autosave: false,
