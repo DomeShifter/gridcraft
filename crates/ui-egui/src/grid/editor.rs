@@ -137,11 +137,22 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
     };
     let items = gridcraft_engine::cmd::data::list_items(&wb, si, c, &dv);
     let r = geo.cell_rect(sh, c);
-    // Fit the popup to its rows (up to LIST_PICKER_MAX_ROWS); without a minimum the scroll area collapses to its 64 px default.
-    let height = list_picker_height(items.len(), LIST_PICKER_ROW_H, ui.spacing().item_spacing.y);
-    // Open below the cell, or above it when the rows would run past the bottom of the window (as Excel does).
     let screen = ui.ctx().content_rect();
-    let above = r.bottom() + height + LIST_PICKER_CHROME > screen.bottom() && r.top() - height - LIST_PICKER_CHROME >= screen.top();
+    // A host's menu look (StarSheets): every choice shown, as tall as the window allows below
+    // or above the cell (whichever has more room), then a scroll bar that is always visible.
+    let look = app.ui.menu_look;
+    let (height, above) = if look.is_some() {
+        let full = items.len().max(1) as f32 * 32.0;
+        let room_below = (screen.bottom() - r.bottom() - LIST_PICKER_CHROME - 16.0).max(32.0);
+        let room_above = (r.top() - screen.top() - LIST_PICKER_CHROME - 16.0).max(32.0);
+        let above = full > room_below && room_above > room_below;
+        (full.min(if above { room_above } else { room_below }), above)
+    } else {
+        // Fit the popup to its rows (up to LIST_PICKER_MAX_ROWS); without a minimum the scroll area collapses to its 64 px default.
+        let height = list_picker_height(items.len(), LIST_PICKER_ROW_H, ui.spacing().item_spacing.y);
+        // Open below the cell, or above it when the rows would run past the bottom of the window (as Excel does).
+        (height, r.bottom() + height + LIST_PICKER_CHROME > screen.bottom() && r.top() - height - LIST_PICKER_CHROME >= screen.top())
+    };
     let (at, pivot) = match (above, geo.rtl) {
         (false, false) => (geo.mirror_pos(r.left_bottom()), Align2::LEFT_TOP),
         (false, true) => (geo.mirror_pos(r.left_bottom()), Align2::RIGHT_TOP),
@@ -150,14 +161,21 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
     };
     let mut close = false;
     let response = egui::Area::new(egui::Id::unique("dv_list")).fixed_pos(at).pivot(pivot).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-        egui::Frame::popup(ui.style()).inner_margin(2.0).show(ui, |ui| {
-            ui.set_min_width(r.width().max(100.0));
-            egui::ScrollArea::vertical().max_height(height).min_scrolled_height(height).show(ui, |ui| {
+        let frame = if look.is_some() { egui::Frame::menu(ui.style()) } else { egui::Frame::popup(ui.style()).inner_margin(2.0) };
+        frame.show(ui, |ui| {
+            let width = match look {
+                Some(l) => (l.style)(ui).max(r.width()),
+                None => r.width().max(100.0),
+            };
+            ui.set_min_width(width);
+            let visibility = if look.is_some() { egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded } else { egui::scroll_area::ScrollBarVisibility::default() };
+            egui::ScrollArea::vertical().max_height(height).min_scrolled_height(height).scroll_bar_visibility(visibility).show(ui, |ui| {
                 for it in &items {
-                    if ui
-                        .add(egui::Button::new(it.as_str()).frame_when_inactive(false).min_size(vec2(r.width().max(100.0), LIST_PICKER_ROW_H)))
-                        .clicked()
-                    {
+                    let row = match look {
+                        Some(l) => ui.add_sized([width, 32.0], (l.row)(it.as_str(), "")),
+                        None => ui.add(egui::Button::new(it.as_str()).frame_when_inactive(false).min_size(vec2(width, LIST_PICKER_ROW_H))),
+                    };
+                    if row.clicked() {
                         app.run_or_alert("cell.set", json!({"cell": c.a1(), "input": it}));
                         close = true;
                     }
