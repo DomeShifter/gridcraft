@@ -10,6 +10,7 @@ use gridcraft_model::{
 };
 
 use crate::drawing::{Obj, image_content_type, image_ext};
+use crate::FunctionInfo;
 use crate::fmla::text_to_file;
 use crate::styles::{color_attrs, dxf_id};
 use crate::tables::{paper_id, px_to_col_width, px_to_pt};
@@ -74,12 +75,27 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
             }
         }
     }
+    // Google Sheets formulas Excel can't read (see [`google_only`]): their anchors are written
+    // in Google's export wrapper and the cells they spill into as its placeholders.
+    let google: std::collections::HashSet<CellRef> = sheet
+        .spill_ranges
+        .keys()
+        .copied()
+        .chain(sheet.cells.iter().filter(|(_, c)| c.formula.is_some()).map(|(at, _)| at))
+        .filter(|a| sheet.cells.get(*a).and_then(|c| c.formula.as_deref()).is_some_and(|f| google_only(f, out.functions)))
+        .collect();
+    let mut placeholders: std::collections::HashSet<CellRef> = std::collections::HashSet::new();
+    for (a, r) in sheet.spill_ranges.iter().filter(|(a, r)| !r.is_single() && google.contains(a)) {
+        placeholders.extend(r.iter().take(1_000_000).filter(|c| c != a));
+    }
     // Dynamic-array spills: anchor → range, and the spilled values to cache.
     let dynamic: BTreeMap<CellRef, RangeRef> = sheet
         .spill_ranges
         .iter()
         .filter(|(a, r)| {
-            !r.is_single() && sheet.cells.get(**a).is_some_and(|c| c.py.is_some() || c.formula.as_ref().is_some_and(|f| f.array.is_none()))
+            !r.is_single()
+                && !google.contains(a)
+                && sheet.cells.get(**a).is_some_and(|c| c.py.is_some() || c.formula.as_ref().is_some_and(|f| f.array.is_none()))
         })
         .map(|(a, r)| (*a, *r))
         .collect();
@@ -191,7 +207,12 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
         s.push_str("</cols>");
     }
 
-    write_sheet_data(&mut s, SheetCellData { workbook: wb, index: si, sheet, overrides: &overrides, extra: &extra, dynamic: &dynamic }, &sid, out);
+    write_sheet_data(
+        &mut s,
+        SheetCellData { workbook: wb, index: si, sheet, overrides: &overrides, extra: &extra, dynamic: &dynamic, google: &google, placeholders: &placeholders },
+        &sid,
+        out,
+    );
 
     let prio = write_sheet_rules(&mut s, sheet, &mut rels, out);
     let kept = write_sheet_printing(&mut s, sheet, &mut rels, out);
@@ -226,6 +247,50 @@ struct CellWriteInput<'a> {
     header_override: Option<&'a String>,
     spill_value: Option<&'a Value>,
     dynamic_range: Option<&'a RangeRef>,
+    /// Written in Google Sheets' export wrapper (see [`google_only`]).
+    google: bool,
+    /// A cell a wrapped formula spills into: Google's `COMPUTED_VALUE` placeholder.
+    placeholder: bool,
+}
+
+/// Google Sheets functions that Excel doesn't have. A formula calling one, or holding a `{…}`
+/// array literal with ranges or formulas in it (not valid in Excel), is saved the way Google
+/// Sheets' own export saves it: `IFERROR(__xludf.DUMMYFUNCTION("<formula>"),<last result>)`, so
+/// Excel shows the result and the reader gets the formula back (StarSheets).
+const GOOGLE_ONLY: &[&str] = &[
+    "ARRAY_LITERAL", "ARRAY_ROW", "ARRAYFORMULA", "QUERY", "SORTN", "SPLIT", "REGEXMATCH", "REGEXEXTRACT", "REGEXREPLACE", "FLATTEN", "JOIN",
+    "COUNTUNIQUE", "ISBETWEEN", "ISEMAIL", "ISURL", "ARRAY_CONSTRAIN", "TO_DATE", "TO_DOLLARS", "TO_PERCENT", "TO_PURE_NUMBER", "TO_TEXT",
+    "EPOCHTODATE", "SPARKLINE", "GOOGLEFINANCE", "GOOGLETRANSLATE", "DETECTLANGUAGE", "IMPORTRANGE", "IMPORTDATA", "IMPORTHTML", "IMPORTXML",
+    "IMPORTFEED", "CONTINUE", "ADD", "MINUS", "MULTIPLY", "DIVIDE", "EQ", "NE", "GT", "GTE", "LT", "LTE", "UMINUS", "UPLUS", "UNARY_PERCENT",
+];
+
+/// Whether `f` must be saved in Google Sheets' export wrapper: it uses something only Google
+/// Sheets has, every function in it is one GridCraft knows (so the reader unwraps it again: an
+/// unknown one would stay wrapped in the formula people see), it isn't wrapped already, and the
+/// wrapper stays within Excel's formula length.
+fn google_only(f: &Formula, functions: FunctionInfo) -> bool {
+    let Some(e) = f.expr_arc() else { return false };
+    let (mut google, mut known, mut wrapped) = (false, true, false);
+    e.walk(&mut |x| {
+        if let gridcraft_formula::Expr::Call(n, _) = x {
+            let up = n.to_ascii_uppercase();
+            google |= GOOGLE_ONLY.contains(&up.as_str());
+            known &= (functions.is_builtin)(&up);
+            wrapped |= up.contains("DUMMYFUNCTION");
+        }
+    });
+    google && known && !wrapped && f.text.len() * 2 + 64 < 8192
+}
+
+/// A cached value as a formula literal (the wrapper's fallback).
+fn literal(v: &Value) -> String {
+    match v {
+        Value::Number(n) => num(*n),
+        Value::Text(t) => format!("\"{}\"", t.replace('"', "\"\"")),
+        Value::Bool(b) => (if *b { "TRUE" } else { "FALSE" }).to_string(),
+        Value::Error(e) => e.as_str().to_string(),
+        _ => "\"\"".to_string(),
+    }
 }
 
 fn write_sheet_extensions(s: &mut String, sheet: &Sheet, prio: &[u32]) {
@@ -581,10 +646,12 @@ struct SheetCellData<'a> {
     overrides: &'a BTreeMap<CellRef, String>,
     extra: &'a BTreeMap<CellRef, Value>,
     dynamic: &'a BTreeMap<CellRef, RangeRef>,
+    google: &'a std::collections::HashSet<CellRef>,
+    placeholders: &'a std::collections::HashSet<CellRef>,
 }
 
 fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcraft_model::StyleId) -> u32, out: &mut Out) {
-    let SheetCellData { workbook, index, sheet, overrides, extra, dynamic } = data;
+    let SheetCellData { workbook, index, sheet, overrides, extra, dynamic, google, placeholders } = data;
     // Cell storage is already row-major; sort only when extra cells need merging.
     let mut keys: Vec<(CellRef, Option<&Cell>)> = Vec::with_capacity(sheet.cells.len());
     keys.extend(sheet.cells.iter().map(|(c, cell)| (c, Some(cell))));
@@ -647,7 +714,11 @@ fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcr
             let ov = overrides.get(&cell_ref);
             let ex = extra.get(&cell_ref);
             let mut legacy_cell = None;
+            let wrapped = google.contains(&cell_ref);
             let array = dynamic.get(&cell_ref).copied().or_else(|| {
+                if wrapped {
+                    return None;
+                }
                 let f = cell?.formula.as_ref().filter(|f| f.array.is_none())?;
                 if f.dynamic {
                     return Some(RangeRef::cell(cell_ref));
@@ -674,6 +745,8 @@ fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcr
                     header_override: ov,
                     spill_value: ex,
                     dynamic_range: array.as_ref(),
+                    google: wrapped,
+                    placeholder: placeholders.contains(&cell_ref) && ex.is_some(),
                 },
                 sid,
                 out,
@@ -751,7 +824,7 @@ fn write_sheet_views(s: &mut String, sheet: &Sheet, selected: bool) {
 }
 
 fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_model::StyleId) -> u32, out: &mut Out) {
-    let CellWriteInput { reference: c, cell, picture, header_override: ov, spill_value: extra, dynamic_range: dynamic } = input;
+    let CellWriteInput { reference: c, cell, picture, header_override: ov, spill_value: extra, dynamic_range: dynamic, google, placeholder } = input;
     let style = cell.map(|x| sid(x.style)).unwrap_or(0);
     s.push_str("<c r=\"");
     push_a1(s, c);
@@ -796,14 +869,21 @@ fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_
     };
     // A formula read with dynamic-array metadata keeps it, even where the shape analysis would
     // not need it: Excel decided the formula is evaluated as an array.
-    let own = formula.filter(|f| f.dynamic && f.array.is_none()).map(|_| RangeRef::cell(c));
-    let dynamic = dynamic.or(own.as_ref());
+    let own = formula.filter(|f| f.dynamic && f.array.is_none() && !google).map(|_| RangeRef::cell(c));
+    let dynamic = if google { None } else { dynamic.or(own.as_ref()) };
     // A non-spilling formula may still need array evaluation to avoid implicit intersection.
     if dynamic.is_some() && (formula.is_some_and(|f| f.array.is_none()) || py_text.is_some()) {
         s.push_str(" cm=\"1\"");
         out.dynamic_arrays = true;
     }
-    let text = formula.map(|f| esc(&crate::fmla::to_file(f))).or_else(|| py_text.map(|t| esc(&t)));
+    let text = if placeholder {
+        Some(esc(&format!("IFERROR(__xludf.DUMMYFUNCTION(\"\"\"COMPUTED_VALUE\"\"\"),{})", literal(&value))))
+    } else if let (true, Some(e)) = (google, formula.and_then(|f| f.expr_arc())) {
+        let inner = gridcraft_formula::print(&e).replace('"', "\"\"");
+        Some(esc(&format!("IFERROR(__xludf.DUMMYFUNCTION(\"{inner}\"),{})", literal(&value))))
+    } else {
+        formula.map(|f| esc(&crate::fmla::to_file(f))).or_else(|| py_text.map(|t| esc(&t)))
+    };
     if let Some(text) = text {
         let t = match &value {
             Value::Text(_) => " t=\"str\"",

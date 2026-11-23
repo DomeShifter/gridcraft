@@ -6612,3 +6612,35 @@ fn google_sort_sortn_and_open_ended_ranges() {
     s.execute("cell.set", json!({"cell": "H3", "input": "=ROWS(SORTN(A3:C6,2,3,1,TRUE))"})).unwrap();
     assert_eq!((v(&s, "H1"), v(&s, "H2"), v(&s, "H3")), (Value::Number(1.0), Value::Number(2.0), Value::Number(4.0)));
 }
+
+#[test]
+fn google_only_formulas_save_in_googles_export_wrapper() {
+    // StarSheets: Excel can't read `{A1:B1;…}` with ranges or Google-only functions, so they are
+    // saved as Google Sheets saves them (wrapper + last result, spill cells as placeholders) and
+    // come back unchanged.
+    use std::io::Read;
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Name","Score"],["b",1],["a",5],["b",7]]})).unwrap();
+    let cells = [("D1", "={A1:B1;SORTN(SORT(A2:B,2,0),9^9,2,1,TRUE)}"), ("G1", "=ARRAYFORMULA(B2:B4*2)"), ("H1", "=SUM(B2:B4)"), ("I1", "={1,2}")];
+    for (c, f) in cells {
+        s.execute("cell.set", json!({"cell": c, "input": f})).unwrap();
+    }
+    let before: Vec<(String, Value)> = ["D1", "E2", "D3", "G3", "H1", "J1"].iter().map(|c| (c.to_string(), v(&s, c))).collect();
+    let wb = s.doc().unwrap().wb.clone();
+    let bytes = crate::io::save_bytes(&wb, "x.xlsx").unwrap();
+    let mut xml = String::new();
+    zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap().by_name("xl/worksheets/sheet1.xml").unwrap().read_to_string(&mut xml).unwrap();
+    assert!(xml.contains(r#"<c r="D1" t="str"><f>IFERROR(__xludf.DUMMYFUNCTION("{A1:B1;SORTN("#), "{xml}");
+    assert!(xml.contains(r#"<c r="E2"><f>IFERROR(__xludf.DUMMYFUNCTION("""COMPUTED_VALUE"""),5)</f><v>5</v>"#), "{xml}");
+    assert!(xml.contains(r#"DUMMYFUNCTION("ARRAYFORMULA(B2:B4*2)"),2)"#), "{xml}");
+    // Formulas Excel has, and constant arrays, are written as before.
+    assert!(xml.contains("<f>SUM(B2:B4)</f>") && xml.contains("{1,2}</f>") && !xml.contains("DUMMYFUNCTION(\"{1,2}"), "{xml}");
+    s.execute("file.open", json!({"name": "x", "base64": crate::io::base64_encode(&bytes)})).unwrap();
+    for (c, f) in cells {
+        let got = s.execute("cell.get", json!({"cell": c})).unwrap()["formula"].clone();
+        assert_eq!(got.as_str().unwrap(), f, "{c}");
+    }
+    for (c, want) in before {
+        assert_eq!(v(&s, &c), want, "{c}");
+    }
+}
