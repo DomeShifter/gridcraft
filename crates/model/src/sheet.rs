@@ -178,6 +178,10 @@ fn yes() -> bool {
 /// Default width of a column and height of a row (pixels at 96 dpi) for the default font.
 pub const DEFAULT_COL_WIDTH: f32 = 64.0;
 pub const DEFAULT_ROW_HEIGHT: f32 = 20.0;
+/// StarSheets: sheets the user creates (new workbook, add sheet) get Google Sheets' sizes. Kept
+/// apart from DEFAULT_* because those mean "the file's default" to the xlsx reader and writer.
+pub const NEW_SHEET_COL_WIDTH: f32 = 100.0;
+pub const NEW_SHEET_ROW_HEIGHT: f32 = 21.0;
 
 /// Column width (points) → characters of the default font's digit width (7 px), without the
 /// cell padding: the value the Column Width dialog shows.
@@ -186,6 +190,14 @@ pub fn points_to_chars(px: f64) -> f64 {
 }
 
 impl Sheet {
+    /// A sheet the user creates: [`Sheet::new`] with the new-sheet sizes.
+    pub fn blank(name: impl Into<String>) -> Sheet {
+        let mut sh = Sheet::new(name);
+        sh.default_col_width = NEW_SHEET_COL_WIDTH;
+        sh.default_row_height = NEW_SHEET_ROW_HEIGHT;
+        sh
+    }
+
     pub fn new(name: impl Into<String>) -> Sheet {
         Sheet {
             name: name.into(),
