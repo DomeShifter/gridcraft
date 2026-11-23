@@ -92,6 +92,9 @@ pub struct Tokens {
     pub danger: Color32,
     /// Background error checking: the corner triangle, and the warning button's diamond and mark.
     pub error_check_green: Color32,
+    /// Google Sheets cell markers: a red corner on error cells, a black note corner and an
+    /// orange comment corner, all top-right. Set by a host's palette; GridCraft's own is false.
+    pub sheets_marks: bool,
     pub warning_fill: Color32,
     pub warning_ink: Color32,
     /// Info-bar (notice strip) fills, by severity.
@@ -259,6 +262,7 @@ impl Tokens {
             menu_bg: pick(dark, Color32::WHITE, Color32::from_rgb(0x30, 0x30, 0x30)),
             shadow: pick(dark, Color32::from_black_alpha(40), Color32::from_black_alpha(90)),
             danger: pick(dark, Color32::from_rgb(0xC4, 0x2B, 0x1C), Color32::from_rgb(0xFF, 0x95, 0x85)),
+            sheets_marks: false,
             error_check_green: pick(dark, Color32::from_rgb(0x1E, 0x8E, 0x3E), Color32::from_rgb(0x4C, 0xC2, 0x6B)),
             warning_fill: Color32::from_rgb(0xF2, 0xB7, 0x05),
             warning_ink: Color32::BLACK,

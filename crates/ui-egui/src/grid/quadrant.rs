@@ -596,11 +596,28 @@ fn paint_borders(q: &mut QuadrantPaint<'_>, looks: &[(CellRef, Rect, Look, Optio
         }
         // Comment / note indicator.
         if let Some(cm) = sh.comments.get(c) {
-            let tri_col = if cm.threaded { Color32::from_rgb(0x88, 0x55, 0xC8) } else { Color32::from_rgb(0xD0, 0x2E, 0x2E) };
+            let tri_col = match (t.sheets_marks, cm.threaded) {
+                (true, true) => Color32::from_rgb(0xF2, 0x99, 0x00),
+                (true, false) => Color32::from_rgb(0x20, 0x21, 0x24),
+                (false, true) => Color32::from_rgb(0x88, 0x55, 0xC8),
+                (false, false) => Color32::from_rgb(0xD0, 0x2E, 0x2E),
+            };
             let s = 6.0 * z.max(0.7);
             p.add(egui::Shape::convex_polygon(
                 vec![rect.right_top(), pos2(rect.right(), rect.top() + s), pos2(rect.right() - s, rect.top())],
                 tri_col,
+                Stroke::NONE,
+            ));
+        }
+        // Sheets marks a cell whose value is an error with a red top-right corner.
+        if t.sheets_marks
+            && !sh.show_formulas
+            && sh.cell(*c).is_some_and(|cell| matches!(cell.value, gridcraft_engine::core::Value::Error(_)))
+        {
+            let s = 6.0 * z.max(0.7);
+            p.add(egui::Shape::convex_polygon(
+                vec![rect.right_top(), pos2(rect.right(), rect.top() + s), pos2(rect.right() - s, rect.top())],
+                Color32::from_rgb(0xD9, 0x30, 0x25),
                 Stroke::NONE,
             ));
         }
