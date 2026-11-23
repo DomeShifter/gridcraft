@@ -270,7 +270,9 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
                     ("Paste special", "ui:pasteSpecial"),
                     ("-", ""),
                     ("Insert row above", "home.insertRows"),
+                    ("Insert row below", "ui:insertBelow"),
                     ("Insert column left", "home.insertColumns"),
+                    ("Insert column right", "ui:insertRight"),
                     ("Insert cells", "ui:insertCells"),
                     ("-", ""),
                     ("Delete row", "home.deleteRows"),
@@ -358,6 +360,8 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
                         "ui:pasteSpecial" => app.open_dialog("pasteSpecial", json!({})),
                         "ui:manageRules" => app.open_dialog("manageRules", json!({})),
                         "ui:insertPaste" => app.open_dialog("insertPaste", json!({})),
+                        "ui:insertBelow" => insert_after(app, true),
+                        "ui:insertRight" => insert_after(app, false),
                         "ui:insertCells" => app.open_dialog("insertCells", json!({})),
                         "ui:deleteCells" => app.open_dialog("deleteCells", json!({})),
                         "ui:formatCells" => app.open_dialog("formatCells", json!({})),
@@ -854,7 +858,7 @@ fn menu_entry(app: &SheetApp, ui: &mut egui::Ui, width: Option<f32>, label: &str
 }
 
 /// Inserts as many rows below (or columns to the right of) the selection as it spans.
-fn insert_after(app: &mut SheetApp, rows: bool) {
+pub fn insert_after(app: &mut SheetApp, rows: bool) {
     let Some(r) = app.session.active().map(|d| d.selection.current()) else { return };
     if rows {
         let n = r.end.row - r.start.row + 1;

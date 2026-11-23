@@ -31,6 +31,8 @@ mod geo;
 mod interact;
 mod keyboard;
 mod menus;
+/// Insert rows below (or columns to the right of) the selection: also for a host's own menus.
+pub use menus::insert_after;
 mod quadrant;
 mod selection;
 mod show;
