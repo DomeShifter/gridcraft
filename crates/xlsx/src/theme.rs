@@ -51,7 +51,7 @@ fn typeface<'a>(fs: &'a El, font: &str, kind: &str) -> Option<&'a str> {
 }
 
 pub fn read_theme(root: &El) -> Theme {
-    let mut t = Theme::default();
+    let mut t = Theme::file_default();
     if let Some(n) = root.attr("name") {
         t.name = n.to_string();
     }
@@ -176,7 +176,7 @@ mod tests {
         assert_eq!(t.major_font_ea, "游ゴシック");
         assert_eq!(t.major_font_cs, "Arial");
         // No `<a:latin>` under the minor font: the default stays.
-        assert_eq!(t.minor_font, Theme::default().minor_font);
+        assert_eq!(t.minor_font, Theme::file_default().minor_font);
         assert_eq!(t.minor_font_ea, "ＭＳ Ｐゴシック");
         assert!(t.minor_font_cs.is_empty());
 
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn theme_without_ea_or_cs_writes_empty_attributes() {
-        let t = Theme::default();
+        let t = Theme::file_default();
         let x = write_theme(&t);
         assert!(x.contains(r#"<a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont>"#), "{x}");
         assert!(x.contains(r#"<a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont>"#), "{x}");

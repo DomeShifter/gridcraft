@@ -160,6 +160,16 @@ impl Default for Theme {
     }
 }
 
+impl Theme {
+    /// The theme a FILE is read against when it has no theme part (or its theme leaves a font
+    /// out): Excel's own body and heading font, Calibri. New workbooks use [`Theme::default`]
+    /// (StarSheets: Roboto); reading files against that would cut Calibri fonts' link to the
+    /// theme (`<scheme val="minor"/>`) on the next save.
+    pub fn file_default() -> Self {
+        Theme { major_font: "Calibri".into(), minor_font: "Calibri".into(), ..Theme::default() }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Underline {
     #[default]

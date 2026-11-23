@@ -147,7 +147,9 @@ fn read_shared_strings(cx: &mut Ctx<'_>, wb_rels: &[Rel]) -> Result<(), IoError>
 }
 
 fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel]) -> Result<(), IoError> {
-    // Theme, then styles: a font's link to the theme's body font is read against it.
+    // Theme, then styles: a font's link to the theme's body font is read against it. A file
+    // without a theme part follows Excel's default theme, not the one for new workbooks.
+    wb.theme = gridcraft_model::Theme::file_default();
     if let Some(r) = find_rel(wb_rels, "theme").cloned()
         && let Some(x) = cx.optional_xml(&r.target)?
     {
