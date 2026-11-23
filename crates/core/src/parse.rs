@@ -36,19 +36,20 @@ pub fn set_input_locale(day_first: bool, date: Option<&str>, time: Option<&str>,
     }
 }
 
-static NUMBER_SEPARATORS: std::sync::RwLock<Option<(char, char)>> = std::sync::RwLock::new(None);
+thread_local! {
+    // Per thread: the web app has one; tests that change it don't disturb each other.
+    static NUMBER_SEPARATORS: std::cell::Cell<Option<(char, char)>> = const { std::cell::Cell::new(None) };
+}
 
 /// A host's number separators (decimal, thousands), e.g. `(',', '.')` for Germany: typed numbers
 /// may use them, and formatted numbers show them (`display`). `('.', ',')` is the default.
 pub fn set_number_separators(decimal: char, group: char) {
-    if let Ok(mut s) = NUMBER_SEPARATORS.write() {
-        *s = ((decimal, group) != ('.', ',')).then_some((decimal, group));
-    }
+    NUMBER_SEPARATORS.with(|s| s.set(((decimal, group) != ('.', ',')).then_some((decimal, group))));
 }
 
 /// The separators set by [`set_number_separators`], or `None` for the default `.` and `,`.
 pub fn number_separators() -> Option<(char, char)> {
-    NUMBER_SEPARATORS.read().ok().and_then(|s| *s)
+    NUMBER_SEPARATORS.with(std::cell::Cell::get)
 }
 
 /// Swaps `.` and `,` in formatted number text for the host's separators (the grouping in a code
