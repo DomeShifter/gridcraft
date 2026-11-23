@@ -6604,6 +6604,12 @@ fn google_sort_sortn_and_open_ended_ranges() {
     assert_eq!(v(&s, "E3"), Value::Text("Name".into()));
     assert_eq!((v(&s, "E4"), v(&s, "F4")), (Value::Text("a".into()), Value::Number(5.0)));
     assert_eq!((v(&s, "E5"), v(&s, "F5")), (Value::Text("b".into()), Value::Number(7.0)));
+    // The empty rows under the data (the open range reaches them) stay blank, as in Google Sheets,
+    // not a row of zeros as Excel would show.
+    assert_eq!((v(&s, "E6"), v(&s, "F6")), (Value::Empty, Value::Empty));
+    // An Excel-style formula keeps Excel's zeros.
+    s.execute("cell.set", json!({"cell": "J1", "input": "=SORT(A3:B7)"})).unwrap();
+    assert_eq!(v(&s, "J5"), Value::Number(0.0));
     let f = s.execute("cell.get", json!({"cell": "E3"})).unwrap()["formula"].clone();
     assert!(f.as_str().unwrap().contains("A3:C,"), "{f}");
     // Ties: mode 0 cuts at n, 1 adds rows tied with the last, 3 keeps whole tie groups.

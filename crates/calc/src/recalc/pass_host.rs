@@ -368,7 +368,7 @@ impl PassHost<'_> {
         // A blank cell shows as 0 in a formula's result, inside an array as well (`=A1:A3`,
         // FILTER or SORT of a range with blanks). GROUPBY and PIVOTBY lay out blank cells
         // of their own, which stay blank.
-        let keep_blanks = matches!(&*expr, Expr::Call(n, _) if matches!(n.as_str(), "GROUPBY" | "PIVOTBY"));
+        let keep_blanks = matches!(&*expr, Expr::Call(n, _) if matches!(n.as_str(), "GROUPBY" | "PIVOTBY")) || google_style(&expr);
         let v = match v {
             Value::Array(a) => {
                 let a = if keep_blanks || !a.data.iter().any(|x| matches!(x, Value::Empty)) {
@@ -769,4 +769,20 @@ impl Host for PassHost<'_> {
         *self.rng = x;
         (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64
     }
+}
+
+/// A formula written the Google Sheets way (StarSheets): a `{…}` array literal, a Google-only
+/// array function, or an open-ended range such as `A3:C`. Its array result keeps blank cells
+/// blank, as Google Sheets shows them (Excel shows 0); an open-ended range always reaches the
+/// empty rows under the data, which would otherwise come out as rows of zeros.
+fn google_style(e: &Expr) -> bool {
+    let mut found = false;
+    e.walk(&mut |x| {
+        found |= match x {
+            Expr::Call(n, _) => matches!(n.to_ascii_uppercase().as_str(), "ARRAY_LITERAL" | "ARRAY_ROW" | "ARRAYFORMULA" | "QUERY" | "SORTN"),
+            Expr::Ref(r) => matches!(&r.kind, gridcraft_formula::RefKind::Range(a, b) if b.row == gridcraft_core::MAX_ROWS - 1 && !b.row_abs && a.row < b.row && a.row > 0),
+            _ => false,
+        }
+    });
+    found
 }
