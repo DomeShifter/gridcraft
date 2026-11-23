@@ -34,10 +34,13 @@ impl SheetApp {
 
     /// The open workbooks' (uid, revision), folded: [`Self::used_fonts`] changes only with it.
     fn fonts_key(&self) -> (u64, u64) {
-        self.session
+        let (uid, rev) = self
+            .session
             .documents()
             .iter()
-            .fold((0u64, 0u64), |(uid, rev), d| (uid.wrapping_mul(31).wrapping_add(d.uid), rev.wrapping_mul(31).wrapping_add(d.revision)))
+            .fold((0u64, 0u64), |(uid, rev), d| (uid.wrapping_mul(31).wrapping_add(d.uid), rev.wrapping_mul(31).wrapping_add(d.revision)));
+        // A face a web host added since counts as a change too.
+        (uid, rev.wrapping_add(fonts::web_generation().wrapping_mul(1_000_003)))
     }
 
     /// Installs the text-width closure once, on the first frame.
@@ -101,9 +104,11 @@ impl SheetApp {
         }
         let used = self.used_fonts();
         self.fonts_seen = seen;
-        if used == self.fonts_bound {
+        let generation = fonts::web_generation();
+        if used == self.fonts_bound && generation == self.fonts_web_seen {
             return;
         }
+        self.fonts_web_seen = generation;
         ctx.set_fonts(theme::font_definitions_with(self.ui.language, &used));
         self.fonts_bound = used;
         self.fonts_rebind = true;

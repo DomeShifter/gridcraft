@@ -277,6 +277,8 @@ pub struct SheetApp {
     prepared_fonts: bool,
     /// Workbook fonts bound into the current font set; a change rebinds (installed fonts only).
     fonts_bound: Vec<String>,
+    /// The web-face generation (`fonts::web_generation`) the bound fonts were built with.
+    fonts_web_seen: u64,
     /// The open workbooks' (uid, revision), folded, that `fonts_bound` was computed for, so the
     /// style tables are walked only when a workbook changes.
     fonts_seen: (u64, u64),

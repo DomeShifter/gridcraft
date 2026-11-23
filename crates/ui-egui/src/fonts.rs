@@ -33,8 +33,36 @@ pub(crate) fn read_font(path: &std::path::Path) -> Option<Vec<u8>> {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn read_font(_path: &std::path::Path) -> Option<Vec<u8>> {
-    None
+pub(crate) fn read_font(path: &std::path::Path) -> Option<Vec<u8>> {
+    web_faces().read().ok()?.1.get(path.to_str()?).map(|b| b.to_vec())
+}
+
+/// Faces a web host added at run time (a web build has no installed fonts): the faces, and their
+/// data by the face's made-up path. Bumps [`web_generation`] on every addition.
+#[allow(clippy::type_complexity)]
+fn web_faces() -> &'static std::sync::RwLock<(Vec<Face>, std::collections::HashMap<String, std::sync::Arc<[u8]>>)> {
+    static WEB: OnceLock<std::sync::RwLock<(Vec<Face>, std::collections::HashMap<String, std::sync::Arc<[u8]>>)>> = OnceLock::new();
+    WEB.get_or_init(Default::default)
+}
+
+static WEB_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Adds one face of a font family the host fetched (e.g. a free look-alike served as "Arial"):
+/// from the next frame, cells set in `family` use it. Bold and italic pick the face as the roles do.
+pub fn add_web_face(family: &str, bold: bool, italic: bool, data: Vec<u8>) {
+    let path = format!("web:{family}:{}{}", if bold { "b" } else { "" }, if italic { "i" } else { "" });
+    let face = Face { family: family.to_string(), names: vec![family.to_string()], path: PathBuf::from(&path), index: 0, weight: if bold { 700.0 } else { 400.0 }, italic };
+    if let Ok(mut w) = web_faces().write() {
+        w.0.retain(|f| f.path != face.path);
+        w.0.push(face);
+        w.1.insert(path, data.into());
+    }
+    WEB_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Changes whenever [`add_web_face`] adds a face, so the app rebinds workbook fonts.
+pub fn web_generation() -> u64 {
+    WEB_GENERATION.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// A face keeps at most this many family names, so a hostile `name` table can't grow the catalog.
@@ -233,13 +261,21 @@ pub fn start_scan() {
 
 /// Whether the background scan has finished.
 pub fn scan_done() -> bool {
-    CATALOG.get().is_some()
+    // A web build has no scan: its faces arrive through `add_web_face`.
+    cfg!(target_arch = "wasm32") || CATALOG.get().is_some()
 }
 
 /// The faces of one installed family, by any of its names, regular-weight first (the order roles
 /// pick from).
 pub fn faces_of(family: &str) -> Vec<Face> {
-    catalog_now().map(|cat| faces_named(cat, family)).unwrap_or_default()
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_faces().read().map(|w| faces_named(&w.0, family)).unwrap_or_default()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        catalog_now().map(|cat| faces_named(cat, family)).unwrap_or_default()
+    }
 }
 
 /// The faces in `cat` that go by `wanted`. When two families claim one name the winner is fixed,
@@ -265,7 +301,14 @@ fn faces_named(cat: &[Face], wanted: &str) -> Vec<Face> {
 /// [`cell_family`](crate::theme::cell_family) looks up, so `맑은 고딕` binds as `맑은 고딕`, not as
 /// the catalog's `Malgun Gothic`.
 pub fn installed_among(names: &[String]) -> Vec<String> {
-    catalog_now().map(|cat| installed_in(cat, names)).unwrap_or_default()
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_faces().read().map(|w| installed_in(&w.0, names)).unwrap_or_default()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        catalog_now().map(|cat| installed_in(cat, names)).unwrap_or_default()
+    }
 }
 
 /// [`installed_among`] over a given catalog. Names dedupe exactly, not case-folded: a role key is

@@ -58,6 +58,7 @@ impl SheetApp {
             fonts_set: false,
             prepared_fonts: false,
             fonts_bound: Vec::new(),
+            fonts_web_seen: 0,
             fonts_seen: (0, 0),
             fonts_rebind: false,
             fonts_han: None,
