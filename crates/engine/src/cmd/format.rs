@@ -509,12 +509,17 @@ fn borders(s: &mut Session, p: &Json) -> Result<Json> {
                         _ => {}
                     }
                 });
+                // Which of this cell's edges the preset just drew (a new line on an edge).
+                let (was, now) = (cx.wb.styles.get(st).borders, cx.wb.styles.get(new).borders);
+                let drawn = [was.top != now.top && !now.top.is_none(), was.bottom != now.bottom && !now.bottom.is_none(), was.left != now.left && !now.left.is_none(), was.right != now.right && !now.right.is_none()];
                 cx.sheet_mut(sheet)?.set_style(c, new);
-                if preset == "none" {
+                {
                     // A shared line can be stored on either cell. Selected cells are handled
-                    // by this loop; remove only facing edges outside this range.
-                    for (boundary, dr, dc) in [(top, -1, 0), (bottom, 1, 0), (left, 0, -1), (right, 0, 1)] {
-                        if !boundary {
+                    // by this loop; remove only facing edges outside this range: all of them for
+                    // "none", and for a drawn edge the neighbour's own line on it, so the newest
+                    // line is the one you see (as Sheets does).
+                    for (i, (boundary, dr, dc)) in [(top, -1, 0), (bottom, 1, 0), (left, 0, -1), (right, 0, 1)].into_iter().enumerate() {
+                        if !boundary || !(preset == "none" || drawn[i]) {
                             continue;
                         }
                         let Some(neighbor) = c.offset(dr, dc) else { continue };
