@@ -60,6 +60,32 @@ struct RowState {
     shared_copy_refused: bool,
     dropped: u64,
     rows: u64,
+    /// Google Sheets' spill placeholders (see [`settle_google_spills`]), kept so far as their
+    /// cached values, in reading order.
+    google_spills: Vec<CellRef>,
+}
+
+/// Google Sheets' XLSX export writes every cell an array formula spills into as
+/// `IFERROR(__xludf.DUMMYFUNCTION("""COMPUTED_VALUE"""),<value>)`. Read as cached values, they
+/// would block the spill of a formula that was unwrapped (#SPILL!). A placeholder is emptied when
+/// the cell above it or to its left is an unwrapped (dynamic) formula or an emptied placeholder:
+/// the spill fills it again. Placeholders of a formula still wrapped (a function GridCraft lacks)
+/// keep the values the file shows.
+fn settle_google_spills(st: &RowState, sheet: &mut Sheet) {
+    let mut emptied: std::collections::HashSet<CellRef> = std::collections::HashSet::new();
+    let fills = |sheet: &Sheet, emptied: &std::collections::HashSet<CellRef>, n: CellRef| {
+        emptied.contains(&n)
+            || sheet.cells.get(n).and_then(|c| c.formula.as_ref()).is_some_and(|f| f.dynamic && !f.text.to_ascii_uppercase().contains("DUMMYFUNCTION"))
+    };
+    for &p in &st.google_spills {
+        let up = p.row.checked_sub(1).map(|r| CellRef::new(r, p.col));
+        let left = p.col.checked_sub(1).map(|c| CellRef::new(p.row, c));
+        if [up, left].into_iter().flatten().any(|n| fills(sheet, &emptied, n)) {
+            let style = sheet.cells.get(p).map(|c| c.style).unwrap_or_default();
+            sheet.cells.set(p, Cell { value: Value::Empty, formula: None, style, py: None });
+            emptied.insert(p);
+        }
+    }
 }
 
 /// The known dynamic range `pos` lies in, when it isn't the range's anchor: the cell's cached
@@ -206,6 +232,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
         cx.warn(format!("sheet \"{name}\": {} cells or rows outside the 1,048,576 × 16,384 grid were dropped", st.dropped));
     }
     settle_python_spills_past_budget(&st, &mut sheet);
+    settle_google_spills(&st, &mut sheet);
     drop(bytes);
 
     let mut fit_to_page = false;
@@ -631,6 +658,14 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
     if py.is_some() {
         record_python_spill(st, sheet, pos);
     }
+    // A Google Sheets spill placeholder: its cached value for now (settle_google_spills decides).
+    let formula = match formula {
+        Some(f) if f.dynamic && f.text == "\"COMPUTED_VALUE\"" => {
+            st.google_spills.push(pos);
+            None
+        }
+        other => other,
+    };
     // A formula without dynamic-array metadata is a legacy formula, unless entered as a
     // Ctrl+Shift+Enter array or unwrapped from Google Sheets' export (#2871).
     if formula.as_ref().is_some_and(|f| !f.dynamic && f.array.is_none() && f.expr_arc().is_some()) {
