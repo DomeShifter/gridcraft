@@ -82,8 +82,15 @@ pub(super) fn delete_sheet(s: &mut Session, p: &Json) -> Result<Json> {
                 }
             }
         }
-        if cx.wb.active_sheet() >= cx.wb.sheets.len() || cx.wb.active_sheet() > i {
-            cx.wb.set_active_sheet(cx.wb.active_sheet().saturating_sub(1).min(cx.wb.sheets.len().saturating_sub(1)));
+        let active = cx.wb.active_sheet();
+        if active == i {
+            // Deleting the tab you're on takes you to the visible tab on its left, as Sheets
+            // does (the one on the right only when there's none to the left).
+            let visible = |k: &usize| cx.wb.sheet(*k).is_some_and(|sh| sh.visibility == Visibility::Visible);
+            let next = (0..i).rev().find(visible).or_else(|| (i..cx.wb.sheets.len()).find(visible)).unwrap_or(0);
+            cx.wb.set_active_sheet(next);
+        } else if active >= cx.wb.sheets.len() || active > i {
+            cx.wb.set_active_sheet(active.saturating_sub(1).min(cx.wb.sheets.len().saturating_sub(1)));
         }
         *cx.sel = crate::Selection::default();
         cx.structural = true;
