@@ -577,3 +577,15 @@ fn column_starting_with_at_round_trips() {
         assert_eq!(parse(&text).ok(), Some(Expr::Struct(s)), "printed as {text}");
     }
 }
+
+#[test]
+fn google_open_ended_range() {
+    // StarSheets: Google Sheets' `A3:C` runs to the last row; it prints back as typed, and in
+    // full for files Excel reads.
+    let e = crate::parse("SUM(A3:C)").unwrap();
+    assert_eq!(crate::print(&e), "SUM(A3:C)");
+    assert_eq!(crate::with_full_rows(|| crate::print(&e)), "SUM(A3:C1048576)");
+    assert_eq!(crate::print(&crate::parse("Data!$B2:$D").unwrap()), "Data!$B2:$D");
+    // An absolute last row stays as written.
+    assert_eq!(crate::print(&crate::parse("A1:A$1048576").unwrap()), "A1:A$1048576");
+}

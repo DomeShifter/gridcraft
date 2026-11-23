@@ -380,6 +380,17 @@ impl Parser {
                 self.next();
                 return Ok(wrap(RefKind::Range(a, b), sheet));
             }
+            // Google Sheets' open-ended range `A3:C`: from A3 to the bottom of column C. It is
+            // kept as `A3:C1048576` (what Excel calls it) and prints back as `A3:C` (StarSheets).
+            if matches!(trim, Some(None))
+                && let Tok::Word(w2) = self.peek_at(1)
+                && let Some((c, col_abs)) = word_is_cols(w2)
+            {
+                self.next();
+                self.next();
+                let b = Anchor { row: gridcraft_core::MAX_ROWS - 1, col: c, row_abs: false, col_abs };
+                return Ok(wrap(RefKind::Range(a, b), sheet));
+            }
             let cell = Expr::Ref(Reference { sheet, kind: RefKind::Cell(a) });
             if *self.peek() == Tok::Op("#") {
                 self.next();

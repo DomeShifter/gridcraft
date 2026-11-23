@@ -6589,3 +6589,26 @@ fn fill_down_carries_data_validation() {
     let sh = s.doc().unwrap().wb.active().unwrap().clone();
     assert!(sh.validations[0].ranges.iter().any(|r| r.a1() == "A1:A4"));
 }
+
+#[test]
+fn google_sort_sortn_and_open_ended_ranges() {
+    // StarSheets (to-do 2 row 23): ={A2:C2;SORTN(SORT(A3:C,2,0),9^9,2,1,TRUE)} as in Google Sheets.
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A2", "values": [["Name","Score","X"],["b",1,"p"],["a",5,"q"],["b",7,"r"],["a",2,"s"]]})).unwrap();
+    s.execute("cell.set", json!({"cell": "E1", "input": "=ROWS(A3:C)"})).unwrap();
+    assert_eq!(v(&s, "E1"), Value::Number(1_048_574.0));
+    s.execute("cell.set", json!({"cell": "F1", "input": "=INDEX(SORT(A3:C6,2,FALSE),1,2)"})).unwrap();
+    assert_eq!(v(&s, "F1"), Value::Number(7.0));
+    s.execute("cell.set", json!({"cell": "E3", "input": "={A2:C2;SORTN(SORT(A3:C,2,0),9^9,2,1,TRUE)}"})).unwrap();
+    // The header, then the best row for each name, by name: a 5, b 7.
+    assert_eq!(v(&s, "E3"), Value::Text("Name".into()));
+    assert_eq!((v(&s, "E4"), v(&s, "F4")), (Value::Text("a".into()), Value::Number(5.0)));
+    assert_eq!((v(&s, "E5"), v(&s, "F5")), (Value::Text("b".into()), Value::Number(7.0)));
+    let f = s.execute("cell.get", json!({"cell": "E3"})).unwrap()["formula"].clone();
+    assert!(f.as_str().unwrap().contains("A3:C,"), "{f}");
+    // Ties: mode 0 cuts at n, 1 adds rows tied with the last, 3 keeps whole tie groups.
+    s.execute("cell.set", json!({"cell": "H1", "input": "=ROWS(SORTN(A3:C6,1,0,1,TRUE))"})).unwrap();
+    s.execute("cell.set", json!({"cell": "H2", "input": "=ROWS(SORTN(A3:C6,1,1,1,TRUE))"})).unwrap();
+    s.execute("cell.set", json!({"cell": "H3", "input": "=ROWS(SORTN(A3:C6,2,3,1,TRUE))"})).unwrap();
+    assert_eq!((v(&s, "H1"), v(&s, "H2"), v(&s, "H3")), (Value::Number(1.0), Value::Number(2.0), Value::Number(4.0)));
+}

@@ -167,10 +167,23 @@ fn int_list(v: &Value) -> R<Vec<i64>> {
 
 fn sort(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     let a = arr_arg(args, 0)?;
-    let by_col = opt_bool(args, 3, false)?;
+    // Google Sheets: SORT(range, column, is_ascending, column2, is_ascending2, …), with TRUE/1
+    // ascending and FALSE/0 descending. Five or more arguments can only be that form.
+    let google = args.len() >= 5;
+    let by_col = !google && opt_bool(args, 3, false)?;
     let a = if by_col { a.transpose() } else { a };
-    let idx = if has(args, 1) { int_list(&arg(args, 1)?.value)? } else { vec![1] };
-    let ord = if has(args, 2) { int_list(&arg(args, 2)?.value)? } else { vec![1] };
+    let (idx, ord) = if google {
+        let mut idx = Vec::new();
+        let mut ord = Vec::new();
+        for i in (1..args.len()).step_by(2) {
+            idx.push(num(args, i)?.trunc() as i64);
+            ord.push(if has(args, i + 1) { num(args, i + 1)?.trunc() as i64 } else { 1 });
+        }
+        (idx, ord)
+    } else {
+        (if has(args, 1) { int_list(&arg(args, 1)?.value)? } else { vec![1] }, if has(args, 2) { int_list(&arg(args, 2)?.value)? } else { vec![1] })
+    };
+    let ord: Vec<i64> = ord.into_iter().map(google_order).collect();
     if idx.is_empty() || idx.iter().any(|&i| i < 1 || i > a.cols as i64) || ord.iter().any(|&o| o != 1 && o != -1) {
         return Err(CellError::Value);
     }
@@ -187,6 +200,86 @@ fn sort(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     lines.sort_by(|x, y| cmp_keys(&x.0, &y.0, &orders));
     let out = Array::new(a.rows, a.cols, lines.into_iter().flat_map(|(_, r)| r).collect()).ok_or(CellError::Calc)?;
     Ok(Value::from(if by_col { out.transpose() } else { out }))
+}
+
+/// A sort order: Excel's 1 / -1, or Google Sheets' is_ascending TRUE (1) / FALSE (0).
+fn google_order(o: i64) -> i64 {
+    if o == 0 { -1 } else { o }
+}
+
+/// Google Sheets' SORTN(range, [n], [display_ties_mode], [sort_column, is_ascending], …): the
+/// first `n` rows after sorting. Ties are rows with equal sort keys. Modes: 0 at most `n` rows;
+/// 1 `n` rows plus any rows tied with the last; 2 the first row of each tie group, at most `n`;
+/// 3 every row of the first `n` tie groups.
+fn sortn(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    let a = arr_arg(args, 0)?;
+    let n = if has(args, 1) { num(args, 1)? } else { 1.0 };
+    if !(n >= 0.0) {
+        return Err(CellError::Value);
+    }
+    let n = if n >= a.rows as f64 { a.rows } else { n.trunc() as usize };
+    let mode = if has(args, 2) { num(args, 2)?.trunc() as i64 } else { 0 };
+    if !(0..=3).contains(&mode) {
+        return Err(CellError::Value);
+    }
+    let mut idx = Vec::new();
+    let mut orders = Vec::new();
+    for i in (3..args.len()).step_by(2) {
+        let c = num(args, i)?.trunc() as i64;
+        if c < 1 || c > a.cols as i64 {
+            return Err(CellError::Value);
+        }
+        idx.push(c);
+        orders.push(if has(args, i + 1) { google_order(num(args, i + 1)?.trunc() as i64) } else { 1 });
+    }
+    if idx.is_empty() {
+        // No sort columns: Google sorts by every column in turn, ascending.
+        idx = (1..=a.cols as i64).collect();
+        orders = vec![1; idx.len()];
+    }
+    if orders.iter().any(|&o| o != 1 && o != -1) {
+        return Err(CellError::Value);
+    }
+    let mut lines: Vec<(Vec<Value>, Vec<Value>)> =
+        rows_of(&a).into_iter().map(|r| (idx.iter().map(|&i| r.get(i as usize - 1).cloned().unwrap_or(Value::Empty)).collect(), r)).collect();
+    // A stable sort: tied rows keep their order, so SORTN(SORT(…), …, 2, …) keeps the first.
+    lines.sort_by(|x, y| cmp_keys(&x.0, &y.0, &orders));
+    let tied = |x: &[Value], y: &[Value]| cmp_keys(x, y, &orders) == Ordering::Equal;
+    let mut out: Vec<Vec<Value>> = Vec::new();
+    match mode {
+        0 => out.extend(lines.into_iter().take(n).map(|(_, r)| r)),
+        1 => {
+            let mut last: Option<Vec<Value>> = None;
+            for (k, r) in lines {
+                if out.len() >= n && !last.as_ref().is_some_and(|l| tied(l, &k)) {
+                    break;
+                }
+                out.push(r);
+                last = Some(k);
+            }
+        }
+        _ => {
+            let mut groups = 0;
+            let mut last: Option<Vec<Value>> = None;
+            for (k, r) in lines {
+                let new_group = !last.as_ref().is_some_and(|l| tied(l, &k));
+                if new_group {
+                    if groups == n {
+                        break;
+                    }
+                    groups += 1;
+                }
+                if new_group || mode == 3 {
+                    out.push(r);
+                }
+                last = Some(k);
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(CellError::NA);
+    }
+    from_rows(out, &Value::Empty)
 }
 
 fn sortby(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
@@ -1092,7 +1185,7 @@ pub(crate) fn specs() -> Vec<FnSpec> {
         f!(
             "SORT",
             1,
-            4,
+            255,
             Lookup,
             A,
             "SORT(array, [sort_index], [sort_order], [by_col])",
@@ -1125,6 +1218,7 @@ pub(crate) fn specs() -> Vec<FnSpec> {
         // Google Sheets' QUERY (StarSheets crates/sheets-functions). The 4th argument is added by
         // the calculator: the sheet column the data starts in, so `select C` means column C.
         f!("QUERY", 2, 4, Lookup, A, "QUERY(data, query, [headers])", "Runs a Google Visualization API query (select, where, group by, pivot, order by, limit, label, format) over a range.", query),
+        f!("SORTN", 1, 255, Lookup, A, "SORTN(range, [n], [display_ties_mode], [sort_column], [is_ascending], …)", "Returns the first n rows of a range after sorting (Google Sheets).", sortn),
         f!("ARRAYFORMULA", 1, 1, Lookup, A, "ARRAYFORMULA(array_formula)", "Shows the values of a formula over ranges in the cells below and to the right (Google Sheets).", arrayformula),
         f!("ARRAY_ROW", 1, VAR, Lookup, A, "ARRAY_ROW(value1, [value2], ...)", "One row of a {…} array literal: its parts side by side (Google Sheets).", array_row),
         f!("ARRAY_LITERAL", 1, VAR, Lookup, A, "ARRAY_LITERAL(row1, [row2], ...)", "A {…} array literal: its rows one under another (Google Sheets).", array_literal),

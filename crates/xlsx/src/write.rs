@@ -252,6 +252,11 @@ fn workbook_view_attrs(wb: &Workbook) -> String {
 /// Writes the workbook for the file `book_name` (a bare file name). A PivotChart is bound to its
 /// PivotTable in Excel only when its link starts with the workbook in brackets.
 pub fn write_xlsx_named_with(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>, functions: FunctionInfo) -> Result<Vec<u8>, IoError> {
+    // Google Sheets' open-ended ranges (`A3:C`) are written as Excel reads them (`A3:C1048576`).
+    gridcraft_formula::with_full_rows(|| write_xlsx_inner(wb, kind, book_name, functions))
+}
+
+fn write_xlsx_inner(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>, functions: FunctionInfo) -> Result<Vec<u8>, IoError> {
     if wb.sheets.is_empty() {
         return Err(IoError::Format("a workbook needs at least one sheet".into()));
     }

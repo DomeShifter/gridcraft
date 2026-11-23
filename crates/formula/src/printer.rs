@@ -74,7 +74,14 @@ fn push_range_a1(s: &mut String, r: &Reference, sep: &str) {
         RefKind::Range(a, b) => {
             push_anchor_a1(s, a);
             s.push_str(sep);
-            push_anchor_a1(s, b);
+            // Google Sheets' open-ended `A3:C` (a range to the last row with a relative end row)
+            // prints as typed, except into files: Excel only reads `A3:C1048576`.
+            if b.row == gridcraft_core::MAX_ROWS - 1 && a.row < b.row && !b.row_abs && !FULL_ROWS.with(std::cell::Cell::get) {
+                s.push_str(dollar(b.col_abs));
+                push_col(s, b.col);
+            } else {
+                push_anchor_a1(s, b);
+            }
         }
         RefKind::Rows(r0, a0, r1, a1) => {
             let _ = write!(s, "{}{}{sep}{}{}", dollar(*a0), r0 + 1, dollar(*a1), r1 + 1);
@@ -213,6 +220,20 @@ fn number(n: f64) -> String {
         Some((m, e)) if !e.starts_with('-') => format!("{m}E+{e}"),
         _ => exact,
     }
+}
+
+thread_local! {
+    /// While set, open-ended ranges print their last row (`A3:C1048576`): see [`with_full_rows`].
+    static FULL_ROWS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with open-ended ranges (`A3:C`) printed in full (`A3:C1048576`), for writing files
+/// that Excel reads.
+pub fn with_full_rows<R>(f: impl FnOnce() -> R) -> R {
+    let before = FULL_ROWS.with(|c| c.replace(true));
+    let out = f();
+    FULL_ROWS.with(|c| c.set(before));
+    out
 }
 
 /// Prints an expression in A1 notation.
