@@ -419,8 +419,16 @@ fn handle_press(app: &mut SheetApp, input: &InteractionInput<'_>) {
         return;
     }
     let c = geo.cell_at(sh, p);
-    // Data validation list arrow next to the active cell.
-    if let Some(r) = validation_arrow(sh, geo, sel.active)
+    // Sheets: the ▾ inside any drop-down cell selects that cell and opens its list.
+    if Tokens::get(&resp.ctx).sheets_marks {
+        if let Some(r) = super::editor::sheets_dropdown_hit(sh, geo, c)
+            && r.contains(p)
+        {
+            let _ = app.session.run("selection.set", json!({"range": c.a1()}));
+            app.grid.list_picker = Some(c);
+            return;
+        }
+    } else if let Some(r) = validation_arrow(sh, geo, sel.active)
         && r.contains(p)
     {
         app.grid.list_picker = Some(sel.active);

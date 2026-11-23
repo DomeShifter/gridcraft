@@ -708,6 +708,7 @@ pub(crate) fn paint_overlays(input: OverlayInput<'_>) {
     let OverlayInput { app, ui, painter: p, geo, workbook: wb, sheet_index: si, sheet: sh, selection: sel } = input;
     // Validation dropdown arrow for the active cell.
     if app.editor.is_none()
+        && !Tokens::get(p.ctx()).sheets_marks
         && let Some(r) = validation_arrow(sh, geo, sel.active)
     {
         let t = Tokens::get(p.ctx());

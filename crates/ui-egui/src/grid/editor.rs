@@ -100,6 +100,16 @@ pub fn validation_arrow(sh: &Sheet, geo: &Geo, c: CellRef) -> Option<Rect> {
     Some(Rect::from_min_size(pos2(r.right() + 1.0, r.bottom() - s), vec2(s, s)))
 }
 
+/// Sheets' ▾ inside the right edge of any drop-down cell (drawn by the quadrant painter): its click area.
+pub fn sheets_dropdown_hit(sh: &Sheet, geo: &Geo, c: CellRef) -> Option<Rect> {
+    let dv = sh.validations.iter().find(|d| d.ranges.iter().any(|r| r.contains(c)))?;
+    if dv.kind != gridcraft_engine::model::ValidationKind::List || !dv.in_cell_dropdown || geo.hidden_under_frozen(sh, c) {
+        return None;
+    }
+    let r = geo.cell_rect(sh, c);
+    Some(Rect::from_min_max(pos2(r.right() - 20.0, r.top()), r.right_bottom()))
+}
+
 /// Rows the list-validation dropdown shows before it scrolls (Excel shows 8).
 const LIST_PICKER_MAX_ROWS: usize = 8;
 
