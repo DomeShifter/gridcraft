@@ -36,5 +36,7 @@ pub use workbook::{
 
 /// Font used for new workbooks. Only a name: renderers substitute an available open font
 /// (e.g. the metric-compatible Carlito) when it isn't installed.
-pub const DEFAULT_FONT: &str = "Calibri";
-pub const DEFAULT_FONT_SIZE: f32 = 11.0;
+/// StarSheets: Roboto is the default font for new workbooks (patch 0006).
+pub const DEFAULT_FONT: &str = "Roboto";
+/// StarSheets: 10 pt, as in Google Sheets (patch 0006).
+pub const DEFAULT_FONT_SIZE: f32 = 10.0;
