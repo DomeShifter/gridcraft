@@ -172,7 +172,20 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                     egui::ScrollArea::vertical().id_salt(id.with(("view", shown))).max_height(inner.height()).auto_shrink([false, true]).show(
                         &mut child,
                         |ui| {
-                            if ui.add(egui::Label::new(galley).sense(Sense::click())).clicked() && !read_only {
+                            if t.sheets_formula_bar {
+                                // Sheets: a press in the bar starts editing there, with the caret
+                                // where it was pressed; the text isn't selectable while not
+                                // editing (a selection there made Ctrl+C copy the whole cell).
+                                let shown = galley.clone();
+                                let r = ui.add(egui::Label::new(galley).selectable(false).sense(Sense::click_and_drag()));
+                                if (r.is_pointer_button_down_on() || r.clicked()) && !read_only {
+                                    let caret = r.interact_pointer_pos().map(|p| shown.cursor_from_pos(p - r.rect.min).index);
+                                    app.begin_edit(None, true);
+                                    if let (Some(c), Some(ed)) = (caret, app.editor.as_mut()) {
+                                        ed.caret = usize::from(c).min(ed.text.chars().count());
+                                    }
+                                }
+                            } else if ui.add(egui::Label::new(galley).sense(Sense::click())).clicked() && !read_only {
                                 app.begin_edit(None, true);
                             }
                         },
