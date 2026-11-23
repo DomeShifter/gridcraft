@@ -480,17 +480,49 @@ fn name_box(app: &mut SheetApp, ui: &mut egui::Ui, t: &Tokens) -> Rect {
         app.name_box = None;
     }
     ui.allocate_space(vec2(118.0, 24.0));
-    // Dropdown of names.
-    let names: Vec<String> =
-        app.session.active().map(|d| d.wb.names.iter().filter(|n| !n.hidden).map(|n| n.name.clone()).collect()).unwrap_or_default();
+    // Dropdown of names. Names starting with "_" are a host's or Excel's own bookkeeping
+    // (StarSheets keeps protected ranges as `_sc_protect<n>`): not shown, as in Sheets.
+    let names: Vec<(String, String)> = app
+        .session
+        .active()
+        .map(|d| {
+            d.wb.names
+                .iter()
+                .filter(|n| !n.hidden && !n.name.starts_with('_'))
+                .map(|n| (n.name.clone(), n.formula.trim_start_matches('=').replace('$', "")))
+                .collect()
+        })
+        .unwrap_or_default();
     let mb = Rect::from_min_size(pos2(rect.right() - 16.0, rect.top() + 4.0), vec2(14.0, 16.0));
     icons::paint(ui.painter(), mb, Icon::Chevron, t.text_dim);
     let r = ui.interact(mb, id.with("drop"), Sense::click());
+    let look = app.ui.menu_look;
     egui::Popup::menu(&r).show(|ui| {
+        // A host's menu look (StarSheets): Sheets' rows (name, its range on the right), then
+        // "Manage named ranges".
+        if let Some(l) = look {
+            let width = (l.style)(ui);
+            if names.is_empty() {
+                ui.add_enabled(false, (l.row)("No named ranges", ""));
+            }
+            for (n, range) in names {
+                if ui.add_sized([width, 32.0], (l.row)(&n, &range)).clicked() {
+                    let _ = app.run("edit.goTo", json!({"reference": n}));
+                    app.grid.ensure_visible = true;
+                    ui.close();
+                }
+            }
+            (l.sep)(ui);
+            if ui.add_sized([width, 32.0], (l.row)("Manage named ranges", "")).clicked() {
+                app.open_dialog("nameManager", json!({}));
+                ui.close();
+            }
+            return;
+        }
         if names.is_empty() {
             ui.label(egui::RichText::new("No names defined").italics());
         }
-        for n in names {
+        for (n, _) in names {
             if ui.button(&n).clicked() {
                 let _ = app.run("edit.goTo", json!({"reference": n}));
                 app.grid.ensure_visible = true;
