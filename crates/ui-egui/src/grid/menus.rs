@@ -280,7 +280,6 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
                     ("Create a filter", "data.filter"),
                     ("-", ""),
                     ("Insert link", "ui:insertLink"),
-                    ("Comment", "ui:newComment"),
                     ("Insert note", "ui:newNote"),
                     ("Drop-down", "data.validation"),
                     ("-", ""),

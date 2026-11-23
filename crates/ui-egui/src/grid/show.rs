@@ -739,10 +739,12 @@ pub(crate) fn paint_overlays(input: OverlayInput<'_>) {
             },
         );
     }
-    // Notes: shown on hover (or always when marked visible).
+    // Notes: shown on hover (or always when marked visible). In Sheets mode the host draws its
+    // own note cards (StarSheets notes.rs).
     let hover = app.grid.hover_cell;
     let all_notes = app.session.show_all_notes;
-    for (c, cm) in &sh.comments {
+    let host_notes = Tokens::get(p.ctx()).sheets_marks;
+    for (c, cm) in sh.comments.iter().filter(|_| !host_notes) {
         let show = cm.visible || (all_notes && !cm.threaded) || hover == Some(*c);
         if !show || app.grid.drag != Drag::None {
             continue;

@@ -294,7 +294,10 @@ fn lookup_function_shortcuts(ctx: LookupContext) -> Option<Shortcut> {
 pub fn lookup_sheets(key: Key, physical: Option<Key>, m: Modifiers) -> Option<Shortcut> {
     use Key::*;
     let navigation = matches!(key, ArrowLeft | ArrowRight | ArrowUp | ArrowDown | PageUp | PageDown | Home | End);
+    let typed_backslash = key == Backslash;
     let key = if navigation { key } else { physical.unwrap_or(key) };
+    // A UK/ISO keyboard's \ key (left of Z) reports IntlBackslash: Ctrl+\ is the same shortcut.
+    let key = if typed_backslash || key == IntlBackslash { Backslash } else { key };
     let ctrl = m.ctrl || m.command;
     let (alt, shift) = (m.alt, m.shift);
     let fmt = |code: &str| Shortcut::Run("home.numberFormat", json!({ "code": code }));
