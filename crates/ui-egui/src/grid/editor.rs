@@ -36,17 +36,20 @@ pub(super) fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, s
     // Wrap Text: the editor keeps the column's width and wraps, growing down as Excel's does.
     // Otherwise it widens to the text's one-line width.
     let wrap = st.align.wrap;
-    // StarSheets (to-do 2 row 17): a one-line edit too long for the room right of the cell wraps
-    // at the grid's right edge and grows down instead, as far as the grid goes, as in Sheets.
-    let room_right = geo.cells.right() - rect.left();
+    // StarSheets (to-do 2 rows 16/17): the editor grows with the formula as far as the grid
+    // allows, as in Sheets: wider first (a Wrap cell too, not only its column), then, at the
+    // grid's right edge, wrapping and growing down.
+    let room_right = (geo.cells.right() - rect.left()).max(rect.width());
     let room_down = (geo.cells.bottom() - rect.top()).max(rect.height());
-    if !wrap && room_right > rect.width() {
-        let text_w = ui.painter().layout_no_wrap(ed.text.clone(), font.clone(), Color32::BLACK).size().x;
-        if editor_width(text_w, rect.width(), size) > room_right {
-            let wrapped = ui.painter().layout(ed.text.clone(), font.clone(), Color32::BLACK, (room_right - 4.0).max(1.0));
-            let h = (wrapped.size().y.max(size * 1.3 * shown) + size + 4.0).max(rect.height()).min(room_down);
-            return draw_in_cell_editor(app, ui, geo, sh, wb, cell, rect, &st, font, true, room_right, h);
-        }
+    let text_w = ui.painter().layout_no_wrap(ed.text.clone(), font.clone(), Color32::BLACK).size().x;
+    let want = editor_width(text_w, rect.width(), size);
+    if (wrap && want > rect.width()) || want > room_right {
+        let w = want.min(room_right);
+        let wrapped = ui.painter().layout(ed.text.clone(), font.clone(), Color32::BLACK, (w - 4.0).max(1.0));
+        // Room for the next line while it wraps, so the field never scrolls.
+        let next = if want > room_right { size } else { 0.0 };
+        let h = (wrapped.size().y.max(size * 1.3 * shown) + next + 4.0).max(rect.height()).min(room_down);
+        return draw_in_cell_editor(app, ui, geo, sh, wb, cell, rect, &st, font, true, w, h);
     }
     let (w, h) = if wrap {
         // The field wraps at the width it is given (the editor's less its 2 px inset a side): its
