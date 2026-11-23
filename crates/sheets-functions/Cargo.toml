@@ -1,0 +1,12 @@
+[package]
+name = "sheets-functions"
+description = "Google Sheets functions for StarSheets that GridCraft doesn't have (QUERY first)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+gridcraft-core = { path = "../core" }
+gridcraft-numfmt = { path = "../numfmt" }
+regex = "1"

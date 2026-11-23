@@ -11,5 +11,5 @@ workspace = true
 [dependencies]
 gridcraft-core = { workspace = true }
 # StarSheets: Google Sheets functions (QUERY), kept in the StarSheets repo.
-sheets-functions = { path = "../../../../crates/sheets-functions" }
+sheets-functions = { path = "../sheets-functions" }
 regex = { workspace = true }
