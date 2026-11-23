@@ -36,6 +36,34 @@ pub fn set_input_locale(day_first: bool, date: Option<&str>, time: Option<&str>,
     }
 }
 
+static NUMBER_SEPARATORS: std::sync::RwLock<Option<(char, char)>> = std::sync::RwLock::new(None);
+
+/// A host's number separators (decimal, thousands), e.g. `(',', '.')` for Germany: typed numbers
+/// may use them, and formatted numbers show them (`display`). `('.', ',')` is the default.
+pub fn set_number_separators(decimal: char, group: char) {
+    if let Ok(mut s) = NUMBER_SEPARATORS.write() {
+        *s = ((decimal, group) != ('.', ',')).then_some((decimal, group));
+    }
+}
+
+/// The separators set by [`set_number_separators`], or `None` for the default `.` and `,`.
+pub fn number_separators() -> Option<(char, char)> {
+    NUMBER_SEPARATORS.read().ok().and_then(|s| *s)
+}
+
+/// Swaps `.` and `,` in formatted number text for the host's separators (the grouping in a code
+/// is always `,`, the decimal point `.`). Unchanged with the default separators.
+pub fn localize_number_text(text: &str) -> std::borrow::Cow<'_, str> {
+    match number_separators() {
+        Some((decimal, group)) => text.chars().map(|c| match c {
+            '.' => decimal,
+            ',' => group,
+            c => c,
+        }).collect::<String>().into(),
+        None => text.into(),
+    }
+}
+
 fn input_locale() -> InputLocale {
     INPUT_LOCALE.read().ok().and_then(|l| l.clone()).unwrap_or_default()
 }
@@ -50,6 +78,17 @@ pub fn parse_input(s: &str, sys: DateSystem) -> Parsed {
         return Parsed { value: Value::text(rest), format: None };
     }
     let t = s.trim();
+    // A decimal comma (or the host's decimal mark): "1.234,5" reads as 1234.5.
+    if let Some((decimal, group)) = number_separators()
+        && t.contains(decimal)
+        && t.chars().all(|c| c.is_ascii_digit() || c == decimal || c == group || c == ' ' || c == '\u{a0}' || c == '\u{202f}' || "+-%£€$".contains(c))
+    {
+        let plain: String = t.chars().filter(|c| *c != group && *c != ' ' && *c != '\u{a0}' && *c != '\u{202f}').map(|c| if c == decimal { '.' } else { c }).collect();
+        let p = parse_input(&plain, sys);
+        if matches!(p.value, Value::Number(_)) {
+            return p;
+        }
+    }
     if t.eq_ignore_ascii_case("TRUE") {
         return Parsed { value: Value::Bool(true), format: None };
     }

@@ -40,7 +40,13 @@ pub fn number_format(code: &str) -> NumberFormat {
 
 /// Formats a value with a format code.
 pub fn format(v: &Value, code: &str, wb: &Workbook) -> Formatted {
-    format_value(v, &parsed(code), wb.date_system)
+    let f = parsed(code);
+    let mut out = format_value(v, &f, wb.date_system);
+    // The host's separators (decimal comma); dates and times keep their own punctuation.
+    if matches!(v, Value::Number(_)) && !f.is_date() && gridcraft_core::parse::number_separators().is_some() {
+        out.text = gridcraft_core::parse::localize_number_text(&out.text).into_owned();
+    }
+    out
 }
 
 /// Whether typing `t` back into a General cell would not give the text `t` again (it would parse
@@ -79,8 +85,15 @@ pub fn edit_text(wb: &Workbook, sheet: &Sheet, c: CellRef) -> String {
     }
     let Value::Number(n) = &cell.value else { return raw };
     let code = wb.styles.get(cell.style).num_fmt.as_str();
-    if cell.formula.is_some() || !parsed(code).is_date() {
+    if cell.formula.is_some() {
         return raw;
+    }
+    if !parsed(code).is_date() {
+        // A plain number is edited with the host's decimal mark (no grouping).
+        return match gridcraft_core::parse::number_separators() {
+            Some((decimal, _)) => raw.replace('.', &decimal.to_string()),
+            None => raw,
+        };
     }
     let reads_back = |s: &str| matches!(gridcraft_core::parse::parse_input(s, wb.date_system).value, Value::Number(m) if (m - n).abs() < 1e-9);
     let shown = format(&cell.value, code, wb).text;
