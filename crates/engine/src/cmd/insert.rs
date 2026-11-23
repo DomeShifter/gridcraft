@@ -170,7 +170,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Link",
             ["Insert", "Links"],
             Some("Cmd+K"),
-            "{cell?, target: \"https://…\" | \"Book.xlsx\" | \"Sheet2!A1\" | \"mailto:…\", text?, tooltip?, remove?: bool}",
+            "{cell?, target: \"https://…\" | \"Book.xlsx\" | \"Sheet2!A1\" | \"mailto:…\", text?, tooltip?, remove?: bool, plain?: bool}",
             has_doc,
             insert_link
         ),
@@ -1323,8 +1323,25 @@ fn insert_link(s: &mut Session, p: &Json) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
     let at = cell_param_on(s, p, "cell", sheet)?.unwrap_or(s.doc()?.selection.active);
     if bool_param(p, "remove").unwrap_or(false) {
+        // `plain`: also take off the link look (hyperlink colour + single underline) that adding
+        // the link gave the cell, as Sheets does when a linked cell's text is deleted.
+        let plain = bool_param(p, "plain").unwrap_or(false);
         return edit(s, |cx| {
-            cx.sheet_mut(sheet)?.hyperlinks.remove(&at);
+            let id = cx.wb.sheet(sheet).map(|sh| sh.style_id(at)).unwrap_or_default();
+            let st = cx.wb.styles.get(id);
+            let looks_linked = matches!(st.font.color, Color::Theme(10 | 11, _)) && st.font.underline == Underline::Single;
+            let unstyled = (plain && looks_linked).then(|| {
+                cx.wb.styles.derive(id, |st| {
+                    st.font.color = Color::Auto;
+                    st.font.underline = Underline::None;
+                })
+            });
+            let sh = cx.sheet_mut(sheet)?;
+            sh.hyperlinks.remove(&at);
+            if let Some(style) = unstyled {
+                sh.set_style(at, style);
+            }
+            cx.touch(sheet, at);
             Ok(Json::Null)
         });
     }
