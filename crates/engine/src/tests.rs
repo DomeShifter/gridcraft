@@ -6678,3 +6678,14 @@ fn overflow_wrap_and_clip_are_one_choice() {
     s.execute("home.wrapText", json!({"range": "A1", "on": false})).unwrap();
     assert_eq!(al(&s), (false, false));
 }
+
+#[test]
+fn delete_on_empty_cells_is_not_an_undo_step() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "x"})).unwrap();
+    let steps = s.doc().unwrap().undo.len();
+    s.execute("edit.clearContents", json!({"range": "C3:D9"})).unwrap();
+    assert_eq!(s.doc().unwrap().undo.len(), steps);
+    s.execute("edit.clearContents", json!({"range": "A1"})).unwrap();
+    assert_eq!(s.doc().unwrap().undo.len(), steps + 1);
+}

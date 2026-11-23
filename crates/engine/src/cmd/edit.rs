@@ -267,7 +267,20 @@ fn clear(s: &mut Session, p: &Json, what: &str) -> Result<Json> {
             })
         })
     };
-    // Notes and links aren't cell contents, so the cell comparison that guards a protected sheet
+    // Nothing to clear (Delete on an empty cell): no change, so no undo step (StarSheets).
+    if what == "contents" && !uncheck_only {
+        let d = s.doc()?;
+        let has = d.wb.sheet(sheet).is_some_and(|sh| {
+            ranges.iter().any(|r| {
+                sh.cells.iter_range(*r).any(|(_, x)| !x.value.is_empty() || x.formula.is_some() || x.py.is_some())
+                    || sh.cell_pictures.keys().any(|c| r.contains(*c))
+            })
+        });
+        if !has {
+            return Ok(Json::Null);
+        }
+    }
+        // Notes and links aren't cell contents, so the cell comparison that guards a protected sheet
     // doesn't see them go: a locked cell's are refused here, stored cell or not.
     if matches!(what, "all" | "comments" | "hyperlinks") {
         let d = s.doc()?;
