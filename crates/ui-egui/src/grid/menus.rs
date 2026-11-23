@@ -571,8 +571,9 @@ pub(super) fn object_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
     let Some((at, kind, id)) = app.grid.object_menu else { return };
     let mut close = false;
     let resp = egui::Area::new(egui::Id::unique("object_context")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| {
+        menu_frame(app, ui).show(ui, |ui| {
             ui.set_min_width(200.0);
+            let width = app.ui.menu_look.map(|l| (l.style)(ui));
             let mut items = vec![];
             if kind == "control" {
                 if crate::control_ui::is_button(app, id) {
@@ -590,10 +591,16 @@ pub(super) fn object_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
             let lang = crate::i18n::current(ui.ctx());
             for (label, action) in items {
                 if label == "-" {
-                    ui.separator();
+                    match app.ui.menu_look {
+                        Some(look) => (look.sep)(ui),
+                        None => {
+                            ui.separator();
+                        }
+                    }
                     continue;
                 }
-                if ui.add(egui::Button::new(lang.tr(label)).frame(false).min_size(vec2(190.0, 20.0))).clicked() {
+                let fallback = egui::Button::new(lang.tr(label)).frame(false).min_size(vec2(190.0, 20.0));
+                if menu_entry(app, ui, width, label, fallback).clicked() {
                     close = true;
                     match action {
                         "ui:selectData" => app.open_dialog("selectData", json!({"chart": id})),
