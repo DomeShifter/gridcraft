@@ -66,6 +66,24 @@ pub fn table_headings(geo: &Geo, sh: &Sheet, active: CellRef) -> Vec<TableHeadin
 
 pub(super) fn paint_filter_button(p: &Painter, r: Rect, filtered: bool) {
     let t = Tokens::get(p.ctx());
+    // Sheets: no box, a green icon: three shrinking lines, or a filled funnel while filtered.
+    if t.sheets_marks {
+        let green = egui::Color32::from_rgb(0x18, 0x80, 0x38);
+        if filtered {
+            let (c, w, h) = (r.center(), r.width() * 0.36, r.height() * 0.34);
+            p.add(egui::Shape::convex_polygon(
+                vec![c + vec2(-w, -h), c + vec2(w, -h), c + vec2(w * 0.25, 0.0), c + vec2(w * 0.25, h), c + vec2(-w * 0.25, h * 0.7), c + vec2(-w * 0.25, 0.0)],
+                green,
+                Stroke::NONE,
+            ));
+        } else {
+            let c = r.center();
+            for (dy, half) in [(-3.5, 5.5), (0.0, 3.5), (3.5, 1.5)] {
+                p.line_segment([c + vec2(-half, dy), c + vec2(half, dy)], Stroke::new(1.5, green));
+            }
+        }
+        return;
+    }
     p.rect_filled(r, 2.0, t.sheet_control_bg);
     p.rect_stroke(r, 2.0, Stroke::new(1.0, t.sheet_control_border), StrokeKind::Inside);
     crate::icons::paint_on_sheet(

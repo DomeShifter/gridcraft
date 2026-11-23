@@ -41,6 +41,20 @@ pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
     let on_button = ui.ctx().memory(|m| m.focused()).is_some_and(|f| buttons.contains(&f));
     let enter = !on_button && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     let mut close = false;
+    if let Some(look) = app.ui.menu_look {
+        let ids = SheetsFilterIds { key, search_key };
+        let r = sheets_filter_menu(app, ui, (col, at), &values, look, ids, (was_open, enter));
+        close = r.0;
+        if close || popup_dismissed(&r.1, was_open) {
+            ui.ctx().data_mut(|d| {
+                d.remove::<Vec<(String, bool)>>(key);
+                d.remove::<String>(search_key);
+                d.remove::<Vec<egui::Id>>(buttons_key);
+            });
+            app.grid.filter_menu = None;
+        }
+        return;
+    }
     let area = egui::Area::new(egui::Id::unique("filter_menu")).fixed_pos(at + vec2(-180.0, 10.0)).order(egui::Order::Foreground);
     let response = area.show(ui.ctx(), |ui| {
         egui::Frame::popup(ui.style()).show(ui, |ui| {
@@ -119,6 +133,119 @@ pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
         });
         app.grid.filter_menu = None;
     }
+}
+
+struct SheetsFilterIds {
+    key: egui::Id,
+    search_key: egui::Id,
+}
+
+/// Google Sheets' filter menu (when the host set a menu look): Sort A to Z / Z to A, "Filter by
+/// values" with "Select all N - Clear" and "Displaying N", a search box, a ticked list, and
+/// Cancel / OK. Returns (close, the popup's response).
+fn sheets_filter_menu(
+    app: &mut SheetApp,
+    ui: &mut egui::Ui,
+    (col, at): (u32, egui::Pos2),
+    values: &[(String, bool)],
+    look: crate::MenuLook,
+    ids: SheetsFilterIds,
+    (was_open, enter): (bool, bool),
+) -> (bool, egui::Response) {
+    const W: f32 = 300.0;
+    const GREEN: egui::Color32 = egui::Color32::from_rgb(0x14, 0x6C, 0x2E);
+    const LINK: egui::Color32 = egui::Color32::from_rgb(0x1A, 0x73, 0xE8);
+    let grey = egui::Color32::from_gray(0x5F);
+    let mut close = false;
+    let area = egui::Area::new(egui::Id::unique("filter_menu")).fixed_pos(at + vec2(-W + 40.0, 10.0)).order(egui::Order::Foreground);
+    let response = area.show(ui.ctx(), |ui| {
+        egui::Frame::menu(ui.style()).show(ui, |ui| {
+            (look.style)(ui);
+            ui.set_width(W);
+            if ui.add_sized([W, 32.0], (look.row)("Sort A to Z", "")).clicked() {
+                let _ = app.run("data.sortAscending", json!({"column": col_to_letters(col)}));
+                close = true;
+            }
+            if ui.add_sized([W, 32.0], (look.row)("Sort Z to A", "")).clicked() {
+                let _ = app.run("data.sortDescending", json!({"column": col_to_letters(col)}));
+                close = true;
+            }
+            (look.sep)(ui);
+            let mut checks: Vec<(String, bool)> = ui.ctx().data_mut(|d| d.get_temp::<Vec<(String, bool)>>(ids.key)).unwrap_or(values.to_vec());
+            let mut search: String = ui.ctx().data_mut(|d| d.get_temp(ids.search_key)).unwrap_or_default();
+            let needle = search.trim().to_lowercase();
+            let matches = |v: &str| needle.is_empty() || v.to_lowercase().contains(&needle);
+            let shown = checks.iter().filter(|(v, _)| matches(v)).count();
+            egui::Frame::NONE.inner_margin(egui::Margin::symmetric(24, 4)).show(ui, |ui| {
+                ui.label(egui::RichText::new("▸  Filter by values").size(14.0));
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let all = ui.add(egui::Label::new(egui::RichText::new(format!("Select all {shown}")).color(LINK).underline()).sense(Sense::click()));
+                    ui.label(egui::RichText::new("-").color(LINK));
+                    let none = ui.add(egui::Label::new(egui::RichText::new("Clear").color(LINK).underline()).sense(Sense::click()));
+                    if all.clicked() || none.clicked() {
+                        for c in checks.iter_mut().filter(|(v, _)| matches(v)) {
+                            c.1 = all.clicked();
+                        }
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(egui::RichText::new(format!("Displaying {shown}")).color(grey).size(12.0));
+                    });
+                });
+                ui.add_space(8.0);
+                let field = ui.add(egui::TextEdit::singleline(&mut search).hint_text("Search").desired_width(W - 48.0).margin(vec2(10.0, 8.0)));
+                if !was_open {
+                    field.request_focus();
+                }
+                ui.add_space(4.0);
+                egui::ScrollArea::vertical().max_height(200.0).auto_shrink([false, true]).show(ui, |ui| {
+                    for (v, on) in checks.iter_mut().filter(|(v, _)| matches(v)) {
+                        let (r, resp) = ui.allocate_exact_size(vec2(W - 56.0, 32.0), Sense::click());
+                        if resp.hovered() {
+                            ui.painter().rect_filled(r, 0.0, egui::Color32::from_gray(0xF1));
+                        }
+                        if *on {
+                            let c = r.left_center() + vec2(14.0, 0.0);
+                            ui.painter().line(vec![c + vec2(-5.0, 0.0), c + vec2(-1.5, 3.5), c + vec2(5.5, -4.0)], Stroke::new(1.6, egui::Color32::from_gray(0x44)));
+                        }
+                        ui.painter().text(r.left_center() + vec2(36.0, 0.0), egui::Align2::LEFT_CENTER, v.as_str(), egui::FontId::proportional(14.0), egui::Color32::from_gray(0x20));
+                        if resp.clicked() {
+                            *on = !*on;
+                        }
+                    }
+                });
+            });
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(ids.key, checks.clone());
+                d.insert_temp(ids.search_key, search.clone());
+            });
+            let checks: Vec<(String, bool)> = checks.iter().map(|(v, on)| (v.clone(), *on && matches(v))).collect();
+            (look.sep)(ui);
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.add_space(W - 200.0);
+                if ui.add(egui::Button::new(egui::RichText::new("Cancel").color(GREEN)).fill(egui::Color32::WHITE).stroke(Stroke::new(1.0, egui::Color32::from_gray(0xC4))).corner_radius(4.0).min_size(vec2(84.0, 36.0))).clicked() {
+                    close = true;
+                }
+                let any = checks.iter().any(|(_, on)| *on);
+                let ok = ui.add_enabled(any, egui::Button::new(egui::RichText::new("OK").color(egui::Color32::WHITE)).fill(GREEN).corner_radius(4.0).min_size(vec2(64.0, 36.0)));
+                if ok.clicked() || (enter && any) {
+                    let blanks = checks.iter().any(|(v, on)| v == "(Blanks)" && *on);
+                    let vals: Vec<String> = checks.iter().filter(|(v, on)| *on && v != "(Blanks)").map(|(v, _)| v.clone()).collect();
+                    let p = if checks.iter().all(|(_, b)| *b) {
+                        json!({"column": col_to_letters(col), "clear": true})
+                    } else {
+                        json!({"column": col_to_letters(col), "values": vals, "blanks": blanks})
+                    };
+                    let _ = app.run("data.filterBy", p);
+                    close = true;
+                }
+            });
+            ui.add_space(6.0);
+        });
+    });
+    (close, response.response)
 }
 
 /// Draws and dispatches the cell context menu, including Show Details when offered, clipboard and insert/format actions; closes on Esc or an outside press.
