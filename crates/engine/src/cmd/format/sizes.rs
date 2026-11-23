@@ -102,15 +102,42 @@ pub(super) fn col_width(s: &mut Session, p: &Json) -> Result<Json> {
     let (si, lines) = line_targets(s, p, false)?;
     edit(s, |cx| {
         let sh = cx.sheet_mut(si)?;
-        for (a, b) in lines {
+        for &(a, b) in &lines {
             for c in a..=b {
                 let e = sh.cols.entry(c).or_default();
                 e.size = Some(w as f32);
                 e.hidden = w == 0.0;
             }
         }
+        fit_wrapped_rows(cx, si, &lines);
         Ok(Json::Null)
     })
+}
+
+/// Most rows one column resize refits (a wider sheet keeps the heights it has past it).
+const WIDTH_REFIT_MAX: usize = 200_000;
+
+/// A column's width decides where its wrapping cells fold, so after a width change the rows
+/// holding wrapped cells in those columns are fitted again (as Sheets does): they grow when the
+/// column narrows and shrink back when it widens.
+fn fit_wrapped_rows(cx: &mut crate::cmd::Ctx, si: usize, lines: &[(u32, u32)]) {
+    let Some(sh) = cx.wb.sheet(si) else { return };
+    let Some(u) = sh.used_range() else { return };
+    for &(a, b) in lines {
+        let (a, b) = (a.max(u.start.col), b.min(u.end.col));
+        if a > b {
+            continue;
+        }
+        let r = RangeRef::new(CellRef::new(u.start.row, a), CellRef::new(u.end.row, b));
+        for (c, x) in sh.cells.iter_range(r) {
+            if cx.fit_rows.len() >= WIDTH_REFIT_MAX {
+                return;
+            }
+            if cx.wb.styles.get(x.style).align.wrap {
+                cx.fit_rows.push((si, c.row));
+            }
+        }
+    }
 }
 
 /// Excel column width in characters (of the default font's digit width, 7 px) → pixels.
@@ -235,11 +262,14 @@ pub(super) fn autofit_cols(s: &mut Session, p: &Json) -> Result<Json> {
             }
         }
         let sh = cx.sheet_mut(si)?;
+        let mut cols = Vec::with_capacity(widths.len());
         for (c, w) in widths {
             let e = sh.cols.entry(c).or_default();
             e.size = Some(w.ceil());
             e.hidden = false;
+            cols.push((c, c));
         }
+        fit_wrapped_rows(cx, si, &cols);
         Ok(Json::Null)
     })
 }
