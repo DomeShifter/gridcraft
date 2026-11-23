@@ -763,8 +763,11 @@ fn editor_confirm_keys(ui: &mut egui::Ui, ed: &mut crate::editor::EditState) -> 
     let py_trigger = tab && !shift && ed.is_py_trigger();
     let mut action = if py_trigger {
         None
-    } else if !ed.autocomplete.is_empty() && tab {
+    } else if !ed.autocomplete.is_empty() && (tab || (enter && !shift && Tokens::get(ui.ctx()).sheets_formula_bar)) {
+        // Sheets: Enter takes the highlighted suggestion too ("=lef" → "=LEFT(") and editing
+        // goes on; a second Enter then commits.
         ed.accept_autocomplete();
+        ed.request_focus = true;
         None
     } else if enter {
         Some((if shift { -1 } else { 1 }, 0, false, false))
