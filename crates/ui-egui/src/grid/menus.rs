@@ -286,6 +286,7 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
                     ("Drop-down", "data.validation"),
                     ("-", ""),
                     ("Conditional formatting", "ui:manageRules"),
+                    ("Data validation", "ui:dataValidation"),
                     ("Filter by cell value", "ui:filterValue"),
                     ("Define named range", "ui:defineName"),
                 ]
@@ -359,6 +360,7 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
                     match id {
                         "ui:pasteSpecial" => app.open_dialog("pasteSpecial", json!({})),
                         "ui:manageRules" => app.open_dialog("manageRules", json!({})),
+                        "ui:dataValidation" => app.open_dialog("dataValidation", json!({})),
                         "ui:insertPaste" => app.open_dialog("insertPaste", json!({})),
                         "ui:insertBelow" => insert_after(app, true),
                         "ui:insertRight" => insert_after(app, false),
