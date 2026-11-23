@@ -256,6 +256,11 @@ impl EditState {
             return;
         }
         let before = self.text.get(..self.byte_caret()).unwrap_or("");
+        // Inside a text string ("Appl…) nothing is a function name: an odd number of quotation
+        // marks before the caret (a doubled "" inside a string counts twice) means inside one.
+        if before.matches('"').count() % 2 == 1 {
+            return;
+        }
         let word: String =
             before.chars().rev().take_while(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '_').collect::<String>().chars().rev().collect();
         if word.is_empty() || word.chars().next().is_some_and(|c| c.is_ascii_digit()) {

@@ -583,14 +583,21 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
             ..Default::default()
         };
         let mut pos = 0usize;
-        let mut spans: Vec<(usize, usize, usize)> = refs.iter().filter(|r| r.1 <= s.len()).map(|r| (r.0, r.1, r.4)).collect();
-        spans.sort();
-        for (a, b, idx) in spans {
+        // Text strings in green (as Sheets shows them); references inside a string are just text.
+        let strings = string_spans(s);
+        let mut spans: Vec<(usize, usize, egui::Color32)> = refs
+            .iter()
+            .filter(|r| r.1 <= s.len() && !strings.iter().any(|&(a, b)| r.0 >= a && r.0 < b))
+            .map(|r| (r.0, r.1, t.ref_color(r.4, on_sheet)))
+            .collect();
+        spans.extend(strings.iter().map(|&(a, b)| (a, b, STRING_COLOR)));
+        spans.sort_by_key(|x| (x.0, x.1));
+        for (a, b, colour) in spans {
             if a < pos || !s.is_char_boundary(a) || !s.is_char_boundary(b) {
                 continue;
             }
             job.append(s.get(pos..a).unwrap_or(""), 0.0, egui::TextFormat::simple(font2.clone(), cell_text_color));
-            job.append(s.get(a..b).unwrap_or(""), 0.0, egui::TextFormat::simple(font2.clone(), t.ref_color(idx, on_sheet)));
+            job.append(s.get(a..b).unwrap_or(""), 0.0, egui::TextFormat::simple(font2.clone(), colour));
             pos = b;
         }
         job.append(s.get(pos..).unwrap_or(""), 0.0, egui::TextFormat::simple(font2.clone(), cell_text_color));
@@ -1230,6 +1237,38 @@ struct EditorSuggestion<'a> {
     mine: bool,
 }
 
+/// Text strings in a formula editor.
+const STRING_COLOR: egui::Color32 = egui::Color32::from_rgb(0x18, 0x80, 0x38);
+
+/// Byte ranges of the text strings in a formula, quotation marks included (a doubled "" inside a
+/// string is part of it; a string not closed yet runs to the end).
+fn string_spans(s: &str) -> Vec<(usize, usize)> {
+    let b = s.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'"' {
+            let start = i;
+            i += 1;
+            loop {
+                match b.get(i) {
+                    None => break,
+                    Some(b'"') if b.get(i + 1) == Some(&b'"') => i += 2,
+                    Some(b'"') => {
+                        i += 1;
+                        break;
+                    }
+                    Some(_) => i += 1,
+                }
+            }
+            out.push((start, i.min(b.len())));
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
 fn show_editor_suggestions(ui: &mut egui::Ui, suggestion: EditorSuggestion<'_>) {
     let EditorSuggestion { app, id, resp, ed, galley, tokens: t, mine } = suggestion;
     // Column AutoComplete: the rest of the suggested entry, shown selected after the caret.
@@ -1255,7 +1294,15 @@ fn show_editor_suggestions(ui: &mut egui::Ui, suggestion: EditorSuggestion<'_>) 
         let language = app.ui.language;
         // Areas have their own clip rect: keep cell helpers inside the worksheet.
         let bounds = if ed.from_formula_bar { ui.ctx().content_rect() } else { ui.clip_rect() };
-        egui::Area::new(id.with("ac")).fixed_pos(below).constrain_to(bounds).order(egui::Order::Tooltip).show(ui.ctx(), |ui| {
+        // Never over the text being typed: when the list (its size last frame) doesn't fit below,
+        // it opens above the editor instead of being pushed up over it.
+        let height = ui.ctx().memory(|m| m.area_rect(id.with("ac"))).map_or(0.0, |r| r.height());
+        let (at, pivot) = if below.y + height > bounds.bottom() && resp.rect.top() - 4.0 - height >= bounds.top() {
+            (resp.rect.left_top() - vec2(0.0, 4.0), egui::Align2::LEFT_BOTTOM)
+        } else {
+            (below, egui::Align2::LEFT_TOP)
+        };
+        egui::Area::new(id.with("ac")).fixed_pos(at).pivot(pivot).constrain_to(bounds).order(egui::Order::Tooltip).show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style()).inner_margin(4.0).show(ui, |ui| {
                 if !ed.autocomplete.is_empty() {
                     let mut pick = None;
@@ -1314,5 +1361,14 @@ fn show_editor_suggestions(ui: &mut egui::Ui, suggestion: EditorSuggestion<'_>) 
                 }
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod string_span_tests {
+    #[test]
+    fn strings_in_formulas() {
+        assert_eq!(super::string_spans(r#"=IF(A1="Apple",1,"x""y")"#), vec![(7, 14), (17, 23)]);
+        assert_eq!(super::string_spans(r#"="open"#), vec![(1, 6)]);
     }
 }
