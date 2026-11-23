@@ -205,7 +205,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Conditional Formatting",
             ["Home", "Styles"],
             None,
-            "{range?, rule: {type: cellIs|expression|containsText|beginsWith|endsWith|blanks|noBlanks|errors|noErrors|duplicate|unique|top10|aboveAverage|timePeriod|colorScale|dataBar|iconSet, operator?, value?, value2?, formula?, text?, rank?, bottom?, percent?, below?, period?, colors?: [..], color?, set?, style?: {font?: {bold?, italic?, color?}, fill?: \"#FFC7CE\" | {pattern?, fg?, bg?}, borders?, num_fmt?} (colours \"#RRGGBB\") | preset?: lightRedFill|redText|yellowFill|greenFill|redBorder|lightRedFillDarkRedText…}; a text `value` is matched as text, or kept when already a quoted literal}",
+            "{range?, rule: {type: cellIs|expression|containsText|beginsWith|endsWith|blanks|noBlanks|errors|noErrors|duplicate|unique|top10|aboveAverage|timePeriod|colorScale|dataBar|iconSet, operator?, value?, value2?, formula?, text?, rank?, bottom?, percent?, below?, period?, colors?: [..], stops?: [{type: min|max|num|percent|percentile, value?, color}] (colour scale, 2 or 3), color?, set?, style?: {font?: {bold?, italic?, color?}, fill?: \"#FFC7CE\" | {pattern?, fg?, bg?}, borders?, num_fmt?} (colours \"#RRGGBB\") | preset?: lightRedFill|redText|yellowFill|greenFill|redBorder|lightRedFillDarkRedText…}; a text `value` is matched as text, or kept when already a quoted literal}",
             has_doc,
             add_cf
         ),
@@ -1698,6 +1698,16 @@ fn add_cf(s: &mut Session, p: &Json) -> Result<Json> {
         },
         "aboveAverage" => CfRule::AboveAverage { below: rule.get("below").and_then(Json::as_bool).unwrap_or(false), equal: false, std_dev: 0, style },
         "timePeriod" => CfRule::TimePeriod { period: g("period").unwrap_or_else(|| "today".into()), style },
+        // Configurable points (StarSheets, Google Sheets' Minpoint/Midpoint/Maxpoint):
+        // `stops: [{type: min|max|num|percent|percentile, value?, color: "#RRGGBB"}, …]`, 2 or 3.
+        "colorScale" if rule.get("stops").and_then(Json::as_array).is_some_and(|a| (2..=3).contains(&a.len())) => {
+            let mut stops = Vec::new();
+            for stop in rule.get("stops").and_then(Json::as_array).into_iter().flatten() {
+                let color = super::format::color_param(stop.get("color")).ok_or_else(|| bad("home.conditionalFormat", "each colour-scale stop needs a colour"))?;
+                stops.push((value_kind(Some(stop), CfValueKind::Min), color));
+            }
+            CfRule::ColorScale { stops }
+        }
         "colorScale" => {
             let cols: Vec<Color> = rule
                 .get("colors")
