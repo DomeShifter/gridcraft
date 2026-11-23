@@ -164,7 +164,7 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
         let frame = if look.is_some() { egui::Frame::menu(ui.style()) } else { egui::Frame::popup(ui.style()).inner_margin(2.0) };
         frame.show(ui, |ui| {
             let width = match look {
-                Some(l) => (l.style)(ui).max(r.width()),
+                Some(l) => (l.list_style)(ui, &items),
                 None => r.width().max(100.0),
             };
             ui.set_min_width(width);
@@ -172,7 +172,7 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
             egui::ScrollArea::vertical().max_height(height).min_scrolled_height(height).scroll_bar_visibility(visibility).show(ui, |ui| {
                 for it in &items {
                     let row = match look {
-                        Some(l) => ui.add_sized([width, 32.0], (l.row)(it.as_str(), "")),
+                        Some(l) => ui.add_sized([width, 32.0], (l.list_row)(it.as_str())),
                         None => ui.add(egui::Button::new(it.as_str()).frame_when_inactive(false).min_size(vec2(width, LIST_PICKER_ROW_H))),
                     };
                     if row.clicked() {

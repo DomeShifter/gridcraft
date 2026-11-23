@@ -117,11 +117,15 @@ pub mod desktop_theme;
 
 /// How a host draws the cell and header menus: `style` sets up the menu's `Ui` and returns the
 /// row width, `row` builds a row from its label and shortcut text, `sep` draws a divider.
+/// `list_style` sets up a drop-down list (data validation) and returns a width that fits its
+/// choices; `list_row` builds one of its rows (no icon column).
 #[derive(Clone, Copy, Debug)]
 pub struct MenuLook {
     pub style: fn(&mut egui::Ui) -> f32,
     pub row: fn(&str, &str) -> egui::Button<'static>,
     pub sep: fn(&mut egui::Ui),
+    pub list_style: fn(&mut egui::Ui, &[String]) -> f32,
+    pub list_row: fn(&str) -> egui::Button<'static>,
 }
 
 /// Persisted UI preferences.
