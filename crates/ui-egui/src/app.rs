@@ -235,10 +235,12 @@ impl SheetApp {
             if self.session.prefs.formula_bar || self.editor.as_ref().is_some_and(|e| e.python) {
                 formula_bar::show(self, ui);
             }
-            if self.ui.status_bar {
-                tabs::status_bar(self, ui);
+            if self.chrome.sheet_tabs {
+                if self.ui.status_bar {
+                    tabs::status_bar(self, ui);
+                }
+                tabs::sheet_tabs(self, ui);
             }
-            tabs::sheet_tabs(self, ui);
             pivot_pane::show(self, ui);
             panes::show(self, ui);
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.grid_bg)).show(ui, |ui| {

@@ -64,10 +64,13 @@ pub struct Chrome {
     /// The ribbon (its tabs and commands) and its key tips. A host that draws its own menus and
     /// toolbar turns it off; every command stays reachable through `Session::execute`.
     pub ribbon: bool,
+    /// The sheet tab strip and the status bar under the grid. A host that draws its own sheet
+    /// tabs and selection summary turns it off.
+    pub sheet_tabs: bool,
 }
 
 impl Default for Chrome {
     fn default() -> Self {
-        Chrome { title_bar: true, file_tab: true, ribbon: true }
+        Chrome { title_bar: true, file_tab: true, ribbon: true, sheet_tabs: true }
     }
 }
