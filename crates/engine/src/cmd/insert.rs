@@ -205,7 +205,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Conditional Formatting",
             ["Home", "Styles"],
             None,
-            "{range?, rule: {type: cellIs|expression|containsText|beginsWith|endsWith|blanks|noBlanks|errors|noErrors|duplicate|unique|top10|aboveAverage|timePeriod|colorScale|dataBar|iconSet, operator?, value?, value2?, formula?, text?, rank?, bottom?, percent?, below?, period?, colors?: [..], stops?: [{type: min|max|num|percent|percentile, value?, color}] (colour scale, 2 or 3), color?, set?, style?: {font?: {bold?, italic?, color?}, fill?: \"#FFC7CE\" | {pattern?, fg?, bg?}, borders?, num_fmt?} (colours \"#RRGGBB\") | preset?: lightRedFill|redText|yellowFill|greenFill|redBorder|lightRedFillDarkRedText…}; a text `value` is matched as text, or kept when already a quoted literal}",
+            "{range?, replace?: index (put the rule in place of rule `index`, keeping its priority, instead of adding it first), rule: {type: cellIs|expression|containsText|beginsWith|endsWith|blanks|noBlanks|errors|noErrors|duplicate|unique|top10|aboveAverage|timePeriod|colorScale|dataBar|iconSet, operator?, value?, value2?, formula?, text?, rank?, bottom?, percent?, below?, period?, colors?: [..], stops?: [{type: min|max|num|percent|percentile, value?, color}] (colour scale, 2 or 3), color?, set?, style?: {font?: {bold?, italic?, color?}, fill?: \"#FFC7CE\" | {pattern?, fg?, bg?}, borders?, num_fmt?} (colours \"#RRGGBB\") | preset?: lightRedFill|redText|yellowFill|greenFill|redBorder|lightRedFillDarkRedText…}; a text `value` is matched as text, or kept when already a quoted literal}",
             has_doc,
             add_cf
         ),
@@ -215,7 +215,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Manage Rules…",
             ["Home", "Styles", "Conditional Formatting"],
             None,
-            "{delete?: index, moveUp?: index, moveDown?: index}",
+            "{delete?: index, moveUp?: index, moveDown?: index, set?: index, cf?: a rule as the model stores it (with set: put it back in place of rule `index` exactly, e.g. to cancel a preview)}",
             has_doc,
             manage_cf
         ),
@@ -1758,8 +1758,17 @@ fn add_cf(s: &mut Session, p: &Json) -> Result<Json> {
         other => return Err(bad("home.conditionalFormat", format!("unknown rule type `{other}`"))),
     };
     check_cf_rule(&rule)?;
+    let replace = u32_param(p, "replace").map(|v| v as usize);
     edit(s, |cx| {
         let sh = cx.sheet_mut(sheet)?;
+        // A host's live preview edits one rule in place (StarSheets): no undo needed to take the
+        // previous version back, and no other rule moves.
+        if let Some(i) = replace {
+            let old = sh.cond_formats.get_mut(i).ok_or_else(|| bad("home.conditionalFormat", "no such rule to replace"))?;
+            old.ranges = ranges.clone();
+            old.rule = rule;
+            return Ok(json!({"rules": sh.cond_formats.len()}));
+        }
         let priority = sh.cond_formats.iter().map(|c| c.priority).max().unwrap_or(0) + 1;
         // New rules take precedence over older ones.
         for cf in sh.cond_formats.iter_mut() {
@@ -1810,7 +1819,7 @@ fn rebase_cf_formulas(rule: &mut CfRule, from: CellRef, to: CellRef) {
 
 fn manage_cf(s: &mut Session, p: &Json) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
-    if p.get("delete").is_none() && p.get("moveUp").is_none() && p.get("moveDown").is_none() {
+    if p.get("delete").is_none() && p.get("moveUp").is_none() && p.get("moveDown").is_none() && p.get("set").is_none() {
         let list: Vec<Json> = s
             .doc()?
             .wb
@@ -1821,8 +1830,20 @@ fn manage_cf(s: &mut Session, p: &Json) -> Result<Json> {
             .unwrap_or_default();
         return Ok(json!({"rules": list}));
     }
+    let set = match (u32_param(p, "set"), p.get("cf")) {
+        (Some(i), Some(cf)) => Some((i as usize, serde_json::from_value::<CondFormat>(cf.clone()).map_err(|e| bad("home.manageRules", e.to_string()))?)),
+        (Some(_), None) => return Err(bad("home.manageRules", "`set` needs `cf`")),
+        _ => None,
+    };
+    if let Some((_, cf)) = &set {
+        check_cf_rule(&cf.rule)?;
+    }
     edit(s, |cx| {
         let sh = cx.sheet_mut(sheet)?;
+        if let Some((i, cf)) = set {
+            let slot = sh.cond_formats.get_mut(i).ok_or_else(|| bad("home.manageRules", "no such rule"))?;
+            *slot = cf;
+        }
         // The count is taken again after each step: a delete shortens the list.
         if let Some(i) = u32_param(p, "delete").map(|v| v as usize)
             && i < sh.cond_formats.len()
@@ -1953,6 +1974,27 @@ mod tests {
         assert!(s.active().unwrap().wb.active().unwrap().charts[0].data_table.is_none());
         s.execute("edit.undo", json!({})).unwrap();
         assert!(s.active().unwrap().wb.active().unwrap().charts[0].data_table.is_some());
+    }
+
+    #[test]
+    fn a_rule_is_replaced_in_place_and_put_back_exactly() {
+        let mut s = Session::new();
+        s.new_workbook();
+        for v in ["1", "2"] {
+            let rule = json!({"type": "cellIs", "operator": "greaterThan", "value": v, "preset": "lightRedFill"});
+            s.execute("home.conditionalFormat", json!({"range": "A1:A3", "rule": rule})).unwrap();
+        }
+        let before = s.doc().unwrap().wb.active().unwrap().cond_formats.clone();
+        let rule = json!({"type": "cellIs", "operator": "lessThan", "value": "9", "preset": "redText"});
+        s.execute("home.conditionalFormat", json!({"range": "B1:B2", "rule": rule, "replace": 1})).unwrap();
+        let now = s.doc().unwrap().wb.active().unwrap().cond_formats.clone();
+        assert_eq!(now.len(), 2);
+        assert_eq!(now[0], before[0]);
+        assert_eq!(now[1].ranges[0].a1(), "B1:B2");
+        assert_eq!(now[1].priority, before[1].priority);
+        s.execute("home.manageRules", json!({"set": 1, "cf": serde_json::to_value(&before[1]).unwrap()})).unwrap();
+        assert_eq!(s.doc().unwrap().wb.active().unwrap().cond_formats, before);
+        assert!(s.execute("home.conditionalFormat", json!({"range": "A1", "rule": {"type": "cellIs", "value": "1"}, "replace": 7})).is_err());
     }
 
     #[test]
