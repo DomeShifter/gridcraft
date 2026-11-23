@@ -577,7 +577,10 @@ pub(super) fn object_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
                 items.extend([("Format Control…", "ui:formatControl"), ("-", "")]);
             }
             items.push(("Delete", "object.delete"));
-            if kind == "chart" {
+            if kind == "chart" && app.ui.sheets_keys {
+                // Google Sheets' chart menu: the host's chart editor opens on "formatChart".
+                items = vec![("Edit chart", "ui:formatChart"), ("-", ""), ("Delete chart", "object.delete")];
+            } else if kind == "chart" {
                 items.extend([("-", ""), ("Select Data…", "ui:selectData"), ("Format Chart Area…", "ui:formatChart")]);
             }
             let lang = crate::i18n::current(ui.ctx());
