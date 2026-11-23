@@ -57,6 +57,11 @@ fn tip_text(ui: &Ui, tip: &str) -> String {
 
 /// A flat square icon button with hover highlight and tooltip.
 pub fn icon_button(ui: &mut Ui, icon: Icon, color: Color32, tip: &str, size: egui::Vec2) -> Response {
+    icon_button_sized(ui, icon, color, tip, size, 16.0)
+}
+
+/// [`icon_button`] with the icon drawn `icon_px` square.
+pub fn icon_button_sized(ui: &mut Ui, icon: Icon, color: Color32, tip: &str, size: egui::Vec2, icon_px: f32) -> Response {
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let t = Tokens::get(ui.ctx());
     if resp.is_pointer_button_down_on() {
@@ -64,7 +69,7 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, color: Color32, tip: &str, size: egu
     } else if resp.hovered() {
         ui.painter().rect_filled(rect, 4.0, t.hover);
     }
-    icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(16.0, 16.0)), icon, color);
+    icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(icon_px, icon_px)), icon, color);
     resp.on_hover_text(tip_text(ui, tip))
 }
 

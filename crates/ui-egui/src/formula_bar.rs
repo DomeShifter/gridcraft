@@ -96,7 +96,15 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     // chevron), it is the height the bottom edge was dragged to. It eases only when that target
     // changes.
     let most = max_lines(ui.ctx().content_rect().height(), ui.available_rect_before_wrap().height(), row_h);
-    let lines = if app.ui.formula_bar_expanded { app.ui.formula_bar_lines.clamp(1, most) } else { last.lines.clamp(1, MAX_LINES) };
+    // Sheets: one line until the chevron expands it; long text runs on past the edge.
+    let sheets_one_line = Tokens::get(ui.ctx()).sheets_formula_bar;
+    let lines = if app.ui.formula_bar_expanded {
+        app.ui.formula_bar_lines.clamp(1, most)
+    } else if sheets_one_line {
+        1
+    } else {
+        last.lines.clamp(1, MAX_LINES)
+    };
     let target = one_line(row_h) + (lines - 1) as f32 * row_h;
     let h = ui.ctx().animate_value_with_time(egui::Id::unique("formula_bar.height"), target, EASE_SECONDS);
     let mut layout = BarLayout { height: h, ..Default::default() };
@@ -127,7 +135,11 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                     }
                     buttons = cancel.rect;
                 }
-                let fx = crate::widgets::icon_button(ui, Icon::Fx, if t.sheets_formula_bar { t.text_dim } else { t.text }, "Insert Function", vec2(26.0, 24.0));
+                let fx = if t.sheets_formula_bar {
+                    crate::widgets::icon_button_sized(ui, Icon::Fx, t.text_dim, "Insert Function", vec2(32.0, 24.0), 22.0)
+                } else {
+                    crate::widgets::icon_button(ui, Icon::Fx, t.text, "Insert Function", vec2(26.0, 24.0))
+                };
                 if fx.clicked() {
                     app.open_dialog("insertFunction", json!({}));
                 }
@@ -163,7 +175,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                         let direction = crate::text_direction::cell_direction(order, &text);
                         child.painter().layout_job(egui::text::LayoutJob {
                             direction,
-                            ..egui::text::LayoutJob::simple(text, font.clone(), color, inner.width())
+                            ..egui::text::LayoutJob::simple(text, font.clone(), color, if t.sheets_formula_bar && !app.ui.formula_bar_expanded { f32::INFINITY } else { inner.width() })
                         })
                     };
                     let lines = galley.rows.len();
