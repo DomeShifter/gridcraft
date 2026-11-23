@@ -703,7 +703,7 @@ fn same_content(a: Option<&gridcraft_model::Cell>, b: Option<&gridcraft_model::C
 /// drawn line ends early at the last word that fits. A word wider than the column breaks
 /// mid-word, the way egui does. (#1969)
 fn wrapped_line_count(line: &str, width: f32, size: f32, bold: bool) -> f32 {
-    let word_w = |w: &str| crate::cmd::format::approx_text_width(w, size, bold);
+    let word_w = |w: &str| crate::cmd::format::wrap_text_width(w, size, bold);
     let space_w = word_w(" ");
     let mut lines = 1.0f32;
     let mut used = 0.0f32;

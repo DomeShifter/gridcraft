@@ -40,3 +40,23 @@ fn issue_repro_nasa_sentence() {
     // Excel shows this at ~10 lines in a 12-char column; the character estimate undercounts.
     assert!(h >= 9.0 * 19.0, "NASA sentence in a 12-char column needs ~10 lines, got height {h}");
 }
+
+#[test]
+fn long_wrapped_sentence_gets_no_extra_blank_line() {
+    // A wide column of 10 pt prose that draws on 3 lines in Roboto/Arial. The generous autofit
+    // widths (a space at 0.38 em) asked for 4, and bottom-aligned text showed a blank line above.
+    let mut s = session();
+    // 526 px: the old widths asked for 4 lines here, the text draws on 3.
+    s.execute("home.columnWidth", json!({"cols": "A:A", "width": 526})).unwrap();
+    s.execute("home.fontSize", json!({"range": "A1", "size": 10})).unwrap();
+    s.execute("home.wrapText", json!({"range": "A1", "on": true})).unwrap();
+    s.execute(
+        "cell.set",
+        json!({"cell": "A1", "input": "Pressing Ctrl+Enter inside a cell should go to a new line below (as it does in GSheets) - Related: this cell is an example of a bug where pressing Ctrl_Enter a few times seesm to have left a space above the text I have typed that I can't remove."}),
+    )
+    .unwrap();
+    let h = row_height(&mut s, 0);
+    let line = 10.0 * 96.0 / 72.0 * 1.22;
+    assert!(h < 3.0 * line + 6.0, "3 drawn lines must give a 3-line row, got height {h}");
+    assert!(h > 2.0 * line + 6.0, "the row must still fit 3 lines, got height {h}");
+}

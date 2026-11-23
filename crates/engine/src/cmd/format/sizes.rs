@@ -170,6 +170,35 @@ pub fn approx_text_width(text: &str, size: f32, bold: bool) -> f32 {
     w * size * if bold { 1.07 } else { 1.0 } * 96.0 / 72.0
 }
 
+/// Text width in points for fitting a wrapped row's height. Tighter than [`approx_text_width`]
+/// (which column autofit keeps generous, so nothing is clipped): ASCII glyph widths are the larger
+/// of Roboto's and Arial's, the fonts Sheets-style and Excel-style sheets show. The generous table
+/// counted a space as 0.38 em (Roboto: 0.25), so long wrapped text was given a line too many and,
+/// bottom-aligned, showed a blank line above it.
+pub fn wrap_text_width(text: &str, size: f32, bold: bool) -> f32 {
+    let mut w = 0.0;
+    for c in text.chars() {
+        w += match c {
+            ' ' | '!' | 'I' => 0.28,
+            'i' | 'l' | 'j' | '\'' | '.' | ',' | ':' | ';' | '|' => 0.25,
+            'f' => 0.35,
+            'r' | 't' | '(' | ')' | '-' | '[' | ']' => 0.34,
+            '/' | '\\' | '"' => 0.41,
+            'm' => 0.88,
+            'w' => 0.75,
+            'M' | 'W' => 0.95,
+            'a' | 'b' | 'd' | 'e' | 'g' | 'h' | 'n' | 'p' | 'q' | 'u' | 'o' => 0.57,
+            'c' | 'k' | 's' | 'v' | 'x' | 'y' | 'z' => 0.52,
+            c if c.is_ascii_uppercase() => 0.73,
+            c if c.is_ascii_digit() => 0.57,
+            c if c.is_ascii() => 0.6,
+            c if is_zero_width(c) => 0.0,
+            c => arabic_em(c).unwrap_or(1.0),
+        };
+    }
+    w * size * if bold { 1.07 } else { 1.0 } * 96.0 / 72.0
+}
+
 /// Arabic vowel and Quranic marks, which sit on the previous letter, and invisible format
 /// characters such as direction marks and zero-width joiners.
 fn is_zero_width(c: char) -> bool {
