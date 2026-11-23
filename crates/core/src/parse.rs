@@ -14,6 +14,32 @@ pub struct Parsed {
     pub format: Option<&'static str>,
 }
 
+/// How typed dates and numbers are read and shown, set by a host that has a locale setting
+/// (StarSheets): whether `05/08/1930` is day first, and the formats typed dates, times,
+/// date-times and plain numbers get. Without it, input reads the US way, as before.
+#[derive(Clone, Debug, Default)]
+pub struct InputLocale {
+    pub day_first: bool,
+    pub date: Option<&'static str>,
+    pub time: Option<&'static str>,
+    pub datetime: Option<&'static str>,
+    pub number: Option<&'static str>,
+}
+
+static INPUT_LOCALE: std::sync::RwLock<Option<InputLocale>> = std::sync::RwLock::new(None);
+
+/// Sets (or with `None` clears) the input locale. Format codes are kept for the program's life.
+pub fn set_input_locale(day_first: bool, date: Option<&str>, time: Option<&str>, datetime: Option<&str>, number: Option<&str>) {
+    let keep = |s: Option<&str>| s.filter(|s| !s.is_empty()).map(|s| &*Box::leak(s.to_string().into_boxed_str()));
+    if let Ok(mut l) = INPUT_LOCALE.write() {
+        *l = Some(InputLocale { day_first, date: keep(date), time: keep(time), datetime: keep(datetime), number: keep(number) });
+    }
+}
+
+fn input_locale() -> InputLocale {
+    INPUT_LOCALE.read().ok().and_then(|l| l.clone()).unwrap_or_default()
+}
+
 /// Interprets typed cell input (not formulas). Text that isn't a number, date, boolean or error
 /// stays text. A leading apostrophe forces text.
 pub fn parse_input(s: &str, sys: DateSystem) -> Parsed {
@@ -34,6 +60,8 @@ pub fn parse_input(s: &str, sys: DateSystem) -> Parsed {
         return Parsed { value: Value::Error(e), format: None };
     }
     if let Some((n, f)) = parse_numeric(t, sys) {
+        // A plain number takes the locale's default number format, when one is set.
+        let f = f.or_else(|| input_locale().number.filter(|_| t.bytes().all(|b| b.is_ascii_digit() || b == b'.' || b == b'-')));
         return Parsed { value: Value::number(n), format: f };
     }
     Parsed { value: Value::text(s), format: None }
@@ -280,14 +308,17 @@ fn parse_date(t: &str, sys: DateSystem) -> Option<(f64, &'static str)> {
     let parts: Vec<&str> = t.split(seps).collect();
     if parts.len() == 3 {
         let (a, b, c) = (parts[0].trim(), parts[1].trim(), parts[2].trim());
+        let loc = input_locale();
         if a.len() == 4
             && let (Some(y), Some(m), Some(d)) = (num(a), num(b), num(c))
         {
-            return valid_ymd(sys, y, m, d).map(|s| (s, "yyyy-mm-dd"));
+            return valid_ymd(sys, y, m, d).map(|s| (s, loc.date.unwrap_or("yyyy-mm-dd")));
         }
-        if let (Some(m), Some(d), Some(y)) = (num(a), num(b), num(c)) {
+        if let (Some(p), Some(q), Some(y)) = (num(a), num(b), num(c)) {
             let y = if c.len() <= 2 { if y < 30 { 2000 + y } else { 1900 + y } } else { y };
-            return valid_ymd(sys, y, m, d).map(|s| (s, "m/d/yyyy"));
+            // Day first in a day-first locale (05/08/1930 is 5 August), month first otherwise.
+            let (m, d) = if loc.day_first { (q, p) } else { (p, q) };
+            return valid_ymd(sys, y, m, d).map(|s| (s, loc.date.unwrap_or("m/d/yyyy")));
         }
         // 4-Mar-2026
         if let (Some(d), Some(m), Some(y)) = (num(a), month_from_name(b), num(c)) {
@@ -299,7 +330,8 @@ fn parse_date(t: &str, sys: DateSystem) -> Option<(f64, &'static str)> {
         let (a, b) = (parts[0].trim(), parts[1].trim());
         // m/d in the current year is ambiguous without a clock; use month/day of 2026? Excel uses
         // the current year. We accept d-mmm / mmm-d only with month names, and m/d → current year.
-        if let (Some(m), Some(d)) = (num(a), num(b)) {
+        if let (Some(p), Some(q)) = (num(a), num(b)) {
+            let (m, d) = if input_locale().day_first && b.len() <= 2 { (q, p) } else { (p, q) };
             let y = current_year();
             if (1..=12).contains(&m) && (1..=31).contains(&d) {
                 return valid_ymd(sys, y, m, d).map(|s| (s, "d-mmm"));
@@ -366,6 +398,8 @@ fn parse_datetime(t: &str, sys: DateSystem) -> Option<(f64, Option<&'static str>
             (false, true) => "h:mm AM/PM",
             (true, true) => "h:mm:ss AM/PM",
         };
+        // The locale's time format, except for elapsed hours.
+        let f = if tf < 1.0 { input_locale().time.unwrap_or(f) } else { f };
         return Some((tf, Some(f)));
     }
     if let Some((d, f)) = parse_date(t, sys) {
@@ -381,7 +415,7 @@ fn parse_datetime(t: &str, sys: DateSystem) -> Option<(f64, Option<&'static str>
             continue;
         }
         if let (Some((d, _)), Some((tf, _, _))) = (t.get(..i).and_then(|a| parse_date(a, sys)), parse_time(b)) {
-            return Some((d + tf, Some("m/d/yyyy h:mm")));
+            return Some((d + tf, Some(input_locale().datetime.unwrap_or("m/d/yyyy h:mm"))));
         }
     }
     None
