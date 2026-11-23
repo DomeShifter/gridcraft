@@ -132,7 +132,35 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
             // On a cell with a link Excel offers to edit, open or remove it (#2120).
             let link =
                 app.session.active().and_then(|d| d.wb.active().and_then(|sh| sh.hyperlinks.get(&d.selection.active)).map(|l| l.target.clone()));
-            let mut items: Vec<(&str, &str)> = vec![
+            // Google Sheets' cell menu (host option `sheets_keys`): its order and wording.
+            let sheets = app.ui.sheets_keys;
+            let mut items: Vec<(&str, &str)> = if sheets {
+                vec![
+                    ("Cut", "edit.cut"),
+                    ("Copy", "edit.copy"),
+                    ("Paste", "edit.paste"),
+                    ("Paste special", "ui:pasteSpecial"),
+                    ("-", ""),
+                    ("Insert row above", "home.insertRows"),
+                    ("Insert column left", "home.insertColumns"),
+                    ("Insert cells", "ui:insertCells"),
+                    ("-", ""),
+                    ("Delete row", "home.deleteRows"),
+                    ("Delete column", "home.deleteColumns"),
+                    ("Delete cells", "ui:deleteCells"),
+                    ("-", ""),
+                    ("Create a filter", "data.filter"),
+                    ("Filter by cell value", "ui:filterValue"),
+                    ("-", ""),
+                    ("Insert link", "ui:insertLink"),
+                    ("Comment", "ui:newComment"),
+                    ("Insert note", "ui:newNote"),
+                    ("-", ""),
+                    ("Conditional formatting", "home.conditionalFormat"),
+                    ("Data validation", "data.validation"),
+                    ("Define named range", "ui:defineName"),
+                ]
+            } else { vec![
                 ("Cut", "edit.cut"),
                 ("Copy", "edit.copy"),
                 ("Paste", "edit.paste"),
@@ -153,20 +181,26 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
                 ("Pick From Drop-down List…", "ui:pickList"),
                 ("Define Name…", "ui:defineName"),
                 ("Link…", "ui:insertLink"),
-            ];
-            if let Some(item) = insert_copied {
+            ] };
+            if !sheets
+                && let Some(item) = insert_copied
+            {
                 items.insert(6, item);
             }
             if link.is_some()
                 && let Some(i) = items.iter().position(|(_, id)| *id == "ui:insertLink")
             {
-                items.splice(
-                    i..=i,
-                    [("Edit Hyperlink…", "ui:insertLink"), ("Open Hyperlink", "ui:openLink"), ("Remove Hyperlink", "edit.clearHyperlinks")],
-                );
+                if sheets {
+                    items.splice(i..=i, [("Edit link", "ui:insertLink"), ("Open link", "ui:openLink"), ("Remove link", "edit.clearHyperlinks")]);
+                } else {
+                    items.splice(
+                        i..=i,
+                        [("Edit Hyperlink…", "ui:insertLink"), ("Open Hyperlink", "ui:openLink"), ("Remove Hyperlink", "edit.clearHyperlinks")],
+                    );
+                }
             }
             if show_details_offered(app)
-                && let Some(i) = items.iter().position(|(_, id)| *id == "data.sortDescending")
+                && let Some(i) = items.iter().position(|(_, id)| *id == if sheets { "ui:filterValue" } else { "data.sortDescending" })
             {
                 items.insert(i + 1, ("-", ""));
                 items.insert(i + 2, ("Show Details", "pivot.showDetails"));
