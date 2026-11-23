@@ -123,6 +123,9 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
                             let a = app.session.active().map(|d| d.selection.active).unwrap_or_default();
                             app.grid.list_picker = Some(a);
                             app.grid.list_key = None;
+                            // The list drawn this frame reads the same input: an Enter with no
+                            // row chosen closes it, so take this one away.
+                            ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Enter, .. })));
                         } else if app.ui.sheets_keys && !shift && !m.alt && !m.ctrl {
                             app.begin_edit(None, false);
                             // The editor opened this frame reads the same input: take this Enter
@@ -138,7 +141,17 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
                     Key::F2 => app.begin_edit(None, false),
                     // With an object selected, Delete and Backspace delete it, not the cells.
                     Key::Delete if app.delete_selected_object() => {}
-                    Key::Delete => app.run_or_alert("edit.clearContents", json!({})),
+                    Key::Delete => {
+                        let empty = app.ui.sheets_keys
+                            && app.session.active().is_some_and(|d| {
+                                d.selection.ranges.iter().all(|r| sh.cells.iter_range(*r).all(|(_, x)| x.value.is_empty() && x.formula.is_none() && x.py.is_none()))
+                            });
+                        app.run_or_alert("edit.clearContents", json!({}));
+                        if empty {
+                            app.grid.delete_on_empty = true;
+                            ctx.request_repaint();
+                        }
+                    }
                     Key::Backspace if app.delete_selected_object() => {}
                     Key::Backspace => {
                         // Excel for Mac: Delete clears the cell and starts editing it (Sheets: only clears).

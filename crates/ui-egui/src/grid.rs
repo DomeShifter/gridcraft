@@ -287,6 +287,9 @@ pub struct GridState {
     /// "Edit rule" was chosen at the bottom of a drop-down list: the host opens that cell's
     /// data validation rule (StarSheets' side panel) and clears this.
     pub edit_validation: Option<CellRef>,
+    /// Delete was pressed on cells that hold nothing (Sheets keys): the host may take their
+    /// drop-down or other rule off (Google Sheets' second Delete) and clears this.
+    pub delete_on_empty: bool,
     /// Open task pane: comments, watch, selection, formatChart.
     pub pane: Option<String>,
     /// Ink stroke being drawn (sheet points).

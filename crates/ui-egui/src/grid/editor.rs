@@ -223,7 +223,7 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
             // Sheets: under the choices, a way to the rule itself.
             if let Some(l) = look {
                 (l.sep)(ui);
-                if ui.add_sized([width, 32.0], (l.row)("Edit rule", "").selected(key == Some(items.len()))).clicked() {
+                if ui.add_sized([width, 32.0], (l.list_row)("Edit rule").wrap_mode(egui::TextWrapMode::Extend).selected(key == Some(items.len()))).clicked() {
                     chosen = Some(items.len());
                 }
             }
