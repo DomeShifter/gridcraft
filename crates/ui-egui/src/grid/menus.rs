@@ -326,6 +326,14 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
                     );
                 }
             }
+            // A cell with a note offers to edit or delete it, as Google Sheets does.
+            let has_note = app.session.active().is_some_and(|d| d.wb.active().is_some_and(|sh| sh.comments.contains_key(&d.selection.active)));
+            if sheets
+                && has_note
+                && let Some(i) = items.iter().position(|(_, id)| *id == "ui:newNote")
+            {
+                items.splice(i..=i, [("Edit note", "ui:newNote"), ("Delete note", "review.deleteComment")]);
+            }
             if show_details_offered(app)
                 && let Some(i) = items.iter().position(|(_, id)| *id == if sheets { "ui:filterValue" } else { "data.sortDescending" })
             {
