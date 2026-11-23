@@ -53,7 +53,9 @@ fn drag_cursor(drag: &Drag, rtl: bool) -> Option<CursorIcon> {
         Drag::Select => Some(CursorIcon::Default),
         Drag::Rows(_) | Drag::Cols(_) | Drag::PointRows(_) | Drag::PointCols(_) => Some(CursorIcon::Default),
         Drag::Fill { .. } => Some(CursorIcon::Crosshair),
-        Drag::Move { .. } | Drag::MoveCols { .. } | Drag::Object { handle: None, .. } => Some(CursorIcon::Move),
+        // Sheets: a closed hand while dragging cells, columns or rows to a new place.
+        Drag::Move { .. } | Drag::MoveCols { .. } => Some(CursorIcon::Grabbing),
+        Drag::Object { handle: None, .. } => Some(CursorIcon::Move),
         Drag::ResizeCol { .. } => Some(CursorIcon::ResizeColumn),
         Drag::ResizeRow { .. } => Some(CursorIcon::ResizeRow),
         Drag::Freeze { cols, .. } => Some(if *cols { CursorIcon::ResizeHorizontal } else { CursorIcon::ResizeVertical }),
@@ -101,14 +103,15 @@ fn hover_cursor(app: &SheetApp, ctx: &egui::Context, resp: &egui::Response, poin
             resp.clone().on_hover_text_at_pointer("Drag to fill cells. Drag from inside a cell to select a range.");
         }
     } else if in_cells && app.editor.is_none() && on_cur_border {
-        ctx.set_cursor_icon(CursorIcon::Move);
+        // Sheets: an open hand over the selection's edge (it can be dragged).
+        ctx.set_cursor_icon(CursorIcon::Grab);
     } else if in_cells {
         // Sheets shows the plain arrow over cells, not a cell cross.
         ctx.set_cursor_icon(CursorIcon::Default);
     } else if in_col_header {
         let col = geo.col_at(sh, p.x);
         let selected = sel.ranges.len() == 1 && sel.current().is_full_cols() && sel.current().contains(CellRef::new(0, col));
-        ctx.set_cursor_icon(if selected { CursorIcon::Move } else { CursorIcon::Default });
+        ctx.set_cursor_icon(if selected { CursorIcon::Grab } else { CursorIcon::Default });
     }
 }
 
