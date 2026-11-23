@@ -173,10 +173,16 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                     } else {
                         let order = app.session.active().and_then(|doc| cell_reading_order(app, doc.wb.active_sheet(), doc.selection.active));
                         let direction = crate::text_direction::cell_direction(order, &text);
-                        child.painter().layout_job(egui::text::LayoutJob {
-                            direction,
-                            ..egui::text::LayoutJob::simple(text, font.clone(), color, if t.sheets_formula_bar && !app.ui.formula_bar_expanded { f32::INFINITY } else { inner.width() })
-                        })
+                        let wrap = if t.sheets_formula_bar && !app.ui.formula_bar_expanded { f32::INFINITY } else { inner.width() };
+                        // A formula shows in the same colours as while editing it (Sheets-style hosts).
+                        if t.sheets_formula_bar && !read_only && text.trim_start().starts_with('=') {
+                            let mut job = formula_job(&text, &crate::editor::formula_refs(&text), &font, color, &t, false);
+                            job.direction = direction;
+                            job.wrap.max_width = wrap;
+                            child.painter().layout_job(job)
+                        } else {
+                            child.painter().layout_job(egui::text::LayoutJob { direction, ..egui::text::LayoutJob::simple(text, font.clone(), color, wrap) })
+                        }
                     };
                     let lines = galley.rows.len();
                     // Each cell's view starts at its top: the offset is kept per cell, not per bar.
@@ -577,30 +583,8 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
             job.wrap.max_width = if multiline { wrap_width } else { f32::INFINITY };
             return ui.fonts_mut(|f| f.layout_job(job));
         }
-        let mut job = egui::text::LayoutJob {
-            direction: crate::text_direction::cell_direction(reading_order, s),
-            keep_trailing_whitespace: true,
-            ..Default::default()
-        };
-        let mut pos = 0usize;
-        // Text strings in green (as Sheets shows them); references inside a string are just text.
-        let strings = string_spans(s);
-        let mut spans: Vec<(usize, usize, egui::Color32)> = refs
-            .iter()
-            .filter(|r| r.1 <= s.len() && !strings.iter().any(|&(a, b)| r.0 >= a && r.0 < b))
-            .map(|r| (r.0, r.1, t.ref_color(r.4, on_sheet)))
-            .collect();
-        spans.extend(strings.iter().map(|&(a, b)| (a, b, STRING_COLOR)));
-        spans.sort_by_key(|x| (x.0, x.1));
-        for (a, b, colour) in spans {
-            if a < pos || !s.is_char_boundary(a) || !s.is_char_boundary(b) {
-                continue;
-            }
-            job.append(s.get(pos..a).unwrap_or(""), 0.0, egui::TextFormat::simple(font2.clone(), cell_text_color));
-            job.append(s.get(a..b).unwrap_or(""), 0.0, egui::TextFormat::simple(font2.clone(), colour));
-            pos = b;
-        }
-        job.append(s.get(pos..).unwrap_or(""), 0.0, egui::TextFormat::simple(font2.clone(), cell_text_color));
+        let mut job = formula_job(s, &refs, &font2, cell_text_color, &t, on_sheet);
+        job.direction = crate::text_direction::cell_direction(reading_order, s);
         job.wrap.max_width = if multiline { wrap_width } else { f32::INFINITY };
         ui.fonts_mut(|f| f.layout_job(job))
     };
@@ -1239,6 +1223,93 @@ struct EditorSuggestion<'a> {
 
 /// Text strings in a formula editor.
 const STRING_COLOR: egui::Color32 = egui::Color32::from_rgb(0x18, 0x80, 0x38);
+/// Error values typed in a formula (`#N/A`).
+const ERROR_COLOR: egui::Color32 = egui::Color32::from_rgb(0xC5, 0x22, 0x1F);
+
+/// A formula coloured the same way everywhere it is shown, editing or not, in the cell or the
+/// formula bar (StarSheets, to-do 2 row 15), like a code editor: each reference in its own
+/// colour, text strings green, numbers, function names and TRUE/FALSE in the theme's syntax
+/// colours, error values red, operators and separators dimmed, the rest in `base`.
+pub(crate) fn formula_job(s: &str, refs: &[(usize, usize, gridcraft_engine::core::RangeRef, Option<String>, usize)], font: &FontId, base: egui::Color32, t: &Tokens, on_sheet: bool) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob { keep_trailing_whitespace: true, ..Default::default() };
+    let strings = string_spans(s);
+    let mut spans: Vec<(usize, usize, egui::Color32)> = refs
+        .iter()
+        .filter(|r| r.1 <= s.len() && !strings.iter().any(|&(a, b)| r.0 >= a && r.0 < b))
+        .map(|r| (r.0, r.1, t.ref_color(r.4, on_sheet)))
+        .collect();
+    spans.extend(strings.iter().map(|&(a, b)| (a, b, STRING_COLOR)));
+    // The rest, token by token, where nothing above applies.
+    let taken = |i: usize, spans: &[(usize, usize, egui::Color32)]| spans.iter().any(|&(a, b, _)| i >= a && i < b);
+    let b = s.as_bytes();
+    let mut extra = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        if taken(i, &spans) {
+            i += 1;
+            continue;
+        }
+        let c = b[i];
+        let prev_word = i > 0 && (b[i - 1].is_ascii_alphanumeric() || matches!(b[i - 1], b'_' | b'$' | b'.'));
+        if (c.is_ascii_digit() || (c == b'.' && b.get(i + 1).is_some_and(u8::is_ascii_digit))) && !prev_word {
+            let start = i;
+            while i < b.len() && (b[i].is_ascii_digit() || b[i] == b'.') {
+                i += 1;
+            }
+            if i < b.len() && (b[i] == b'e' || b[i] == b'E') && b.get(i + 1).is_some_and(|x| x.is_ascii_digit() || matches!(x, b'+' | b'-')) {
+                i += 2;
+                while i < b.len() && b[i].is_ascii_digit() {
+                    i += 1;
+                }
+            }
+            if i < b.len() && b[i] == b'%' {
+                i += 1;
+            }
+            extra.push((start, i, t.syntax.number));
+        } else if c.is_ascii_alphabetic() || c == b'_' {
+            let start = i;
+            while i < b.len() && !taken(i, &spans) && (b[i].is_ascii_alphanumeric() || matches!(b[i], b'_' | b'.')) {
+                i += 1;
+            }
+            let word = &s[start..i];
+            let next = s[i..].trim_start().chars().next();
+            if next == Some('(') {
+                extra.push((start, i, t.syntax.builtin));
+            } else if word.eq_ignore_ascii_case("TRUE") || word.eq_ignore_ascii_case("FALSE") {
+                extra.push((start, i, t.syntax.keyword));
+            }
+        } else if c == b'#' {
+            let start = i;
+            let rest = s[i..].to_ascii_uppercase();
+            let known = ["#N/A", "#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#NUM!", "#NULL!", "#SPILL!", "#CALC!", "#GETTING_DATA"];
+            match known.iter().find(|k| rest.starts_with(*k)) {
+                Some(k) => {
+                    i += k.len();
+                    extra.push((start, i, ERROR_COLOR));
+                }
+                None => i += 1,
+            }
+        } else if matches!(c, b'+' | b'-' | b'*' | b'/' | b'^' | b'&' | b'=' | b'<' | b'>' | b'%' | b',' | b';' | b':') {
+            extra.push((i, i + 1, t.text_dim));
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+    spans.extend(extra);
+    spans.sort_by_key(|x| (x.0, x.1));
+    let mut pos = 0usize;
+    for (a, b, colour) in spans {
+        if a < pos || !s.is_char_boundary(a) || !s.is_char_boundary(b) {
+            continue;
+        }
+        job.append(s.get(pos..a).unwrap_or(""), 0.0, egui::TextFormat::simple(font.clone(), base));
+        job.append(s.get(a..b).unwrap_or(""), 0.0, egui::TextFormat::simple(font.clone(), colour));
+        pos = b;
+    }
+    job.append(s.get(pos..).unwrap_or(""), 0.0, egui::TextFormat::simple(font.clone(), base));
+    job
+}
 
 /// Byte ranges of the text strings in a formula, quotation marks included (a doubled "" inside a
 /// string is part of it; a string not closed yet runs to the end).
