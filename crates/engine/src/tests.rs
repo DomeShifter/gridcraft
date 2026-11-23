@@ -1823,6 +1823,27 @@ fn autofit_skips_merged_cells() {
 }
 
 #[test]
+fn excel_rows_of_11pt_text_open_at_excels_20px() {
+    // StarSheets' default font is 10 pt, but an Excel file's 11 pt rows already fit Excel's 20 px
+    // default: they must not be fitted up to 22 px as "bigger than the default font".
+    let mut wb = gridcraft_model::Workbook::new();
+    let calibri = wb.styles.derive(gridcraft_model::StyleId::DEFAULT, |s| {
+        s.font.size = 11.0;
+        s.font.name = "Calibri".into();
+    });
+    let sh = wb.sheet_mut(0).unwrap();
+    sh.default_row_height = gridcraft_model::DEFAULT_ROW_HEIGHT;
+    sh.set_value(CellRef::new(2, 0), Value::text("Excel text"));
+    sh.set_style(CellRef::new(2, 0), calibri);
+    let bytes = gridcraft_xlsx::write_xlsx(&wb).unwrap();
+    let mut s = Session::new();
+    s.execute("file.open", json!({"name": "excel.xlsx", "base64": crate::io::base64_encode(&bytes)})).unwrap();
+    s.execute("cell.set", json!({"cell": "A3", "input": "edited"})).unwrap();
+    let sh = s.doc().unwrap().wb.active().unwrap();
+    assert_eq!(sh.row_height(2), gridcraft_model::DEFAULT_ROW_HEIGHT, "an 11 pt row stays 20 px");
+}
+
+#[test]
 fn open_fits_big_font_rows_from_the_font_not_the_sheet_default() {
     // Excel saves a sheet whose rows hold 16pt text with a 21pt (28px) default row height and no
     // `ht` on rows of that height. Those rows already fit their font: they open at about 28px,

@@ -818,6 +818,12 @@ impl MergeSweep {
     }
 }
 
+/// One unwrapped line of text in a `size` pt font, in px: Excel's 20 px row scaled from the
+/// 11 pt font it is made for, or the font's own 1.8 × size when that is taller.
+fn line_height(size: f32) -> f32 {
+    (size * 1.8).round().max(gridcraft_model::DEFAULT_ROW_HEIGHT * size / gridcraft_model::EXCEL_FONT_SIZE)
+}
+
 /// [`auto_row_height`] with the sheet's merges taken from `sweep`.
 pub(crate) fn fit_row_height(wb: &mut Workbook, si: usize, row: u32, sweep: &mut MergeSweep) {
     // Out of budget: the row keeps the height it has.
@@ -829,10 +835,12 @@ pub(crate) fn fit_row_height(wb: &mut Workbook, si: usize, row: u32, sweep: &mut
         return;
     }
     let default = sh.default_row_height;
-    // Fast path: rows of default-size, unwrapped content keep the default height.
+    // Fast path: rows of unwrapped content whose fonts fit the sheet's default height keep it.
+    // (Judged by the font's own line, not against DEFAULT_FONT_SIZE: StarSheets' 10 pt default
+    // made every 11 pt row of an Excel file look "big" and open at 22 px instead of 20.)
     let plain = sh.cells.row(row, 0, gridcraft_core::MAX_COLS - 1).all(|(_, cell)| {
         let st = wb.styles.get(cell.style);
-        st.font.size <= gridcraft_model::DEFAULT_FONT_SIZE && !st.align.wrap
+        line_height(st.font.size) <= default + 0.5 && !st.align.wrap
     });
     if plain {
         if sh.rows.get(&row).is_some_and(|i| i.size.is_some())
@@ -869,7 +877,7 @@ pub(crate) fn fit_row_height(wb: &mut Workbook, si: usize, row: u32, sweep: &mut
         let size = st.font.size;
         // Scaled from an 11pt row's height, not the sheet's default: a sheet whose default
         // already fits a bigger font (21pt rows for 16pt text) would otherwise scale it twice.
-        let line = (size * 1.8).round().max(gridcraft_model::DEFAULT_ROW_HEIGHT * size / gridcraft_model::DEFAULT_FONT_SIZE);
+        let line = line_height(size);
         let mut lines = 1.0f32;
         if !cell.value.is_empty() || cell.formula.is_some() {
             // Only a wrapping cell is laid out over several lines: each explicit line break
@@ -879,7 +887,7 @@ pub(crate) fn fit_row_height(wb: &mut Workbook, si: usize, row: u32, sweep: &mut
                 let w = sh.col_width(c).max(1.0) - 6.0;
                 lines = text.lines().map(|l| wrapped_line_count(l, w.max(1.0), size, st.font.bold)).sum::<f32>().max(1.0);
             }
-        } else if st.font.size <= gridcraft_model::DEFAULT_FONT_SIZE {
+        } else if line <= default + 0.5 {
             continue;
         }
         let h = if lines > 1.0 { (size * 96.0 / 72.0 * 1.22 * lines + 5.0).ceil() } else { line };

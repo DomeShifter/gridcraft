@@ -40,3 +40,6 @@ pub use workbook::{
 pub const DEFAULT_FONT: &str = "Roboto";
 /// StarSheets: 10 pt, as in Google Sheets (patch 0006).
 pub const DEFAULT_FONT_SIZE: f32 = 10.0;
+/// The font size Excel's default row height ([`DEFAULT_ROW_HEIGHT`], 20 px) is made for:
+/// Calibri 11. Row fitting scales from it, whatever the default font of new workbooks is.
+pub const EXCEL_FONT_SIZE: f32 = 11.0;
