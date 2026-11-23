@@ -34,8 +34,22 @@ pub(super) fn fill_dir(s: &mut Session, p: &Json, dr: i64, dc: i64) -> Result<Js
     let skip = s.doc()?.wb.sheet(sheet).map(|sh| super::filtered_rows(sh, r)).unwrap_or_default();
     edit(s, |cx| {
         crate::fill::fill_except(cx, sheet, src, r, crate::fill::FillMode::Copy, &skip)?;
+        // Ctrl+D / Ctrl+R carry data validation along too, like the fill handle (StarSheets).
+        extend_validations(cx.sheet_mut(sheet)?, src, r);
         Ok(Json::Null)
     })
+}
+
+/// Google Sheets: data validation travels with a fill. A rule that covers every source cell
+/// covers the filled cells too.
+fn extend_validations(sh: &mut gridcraft_model::Sheet, src: RangeRef, target: RangeRef) {
+    for v in &mut sh.validations {
+        let covers = |c: CellRef| v.ranges.iter().any(|r| r.contains(c));
+        let all = (src.start.row..=src.end.row).all(|r| (src.start.col..=src.end.col).all(|c| covers(CellRef::new(r, c))));
+        if all && !v.ranges.iter().any(|r| r.contains(target.start) && r.contains(target.end)) {
+            v.ranges.push(target);
+        }
+    }
 }
 
 pub(super) fn auto_fill(s: &mut Session, p: &Json) -> Result<Json> {
@@ -69,14 +83,7 @@ pub(super) fn auto_fill(s: &mut Session, p: &Json) -> Result<Json> {
         // Google Sheets: data validation travels with the fill handle. A rule that covers every
         // source cell covers the filled cells too.
         if keeps_rules {
-            let sh = cx.sheet_mut(sheet)?;
-            for v in &mut sh.validations {
-                let covers = |c: CellRef| v.ranges.iter().any(|r| r.contains(c));
-                let all = (src.start.row..=src.end.row).all(|r| (src.start.col..=src.end.col).all(|c| covers(CellRef::new(r, c))));
-                if all && !v.ranges.iter().any(|r| r.contains(target.start) && r.contains(target.end)) {
-                    v.ranges.push(target);
-                }
-            }
+            extend_validations(cx.sheet_mut(sheet)?, src, target);
         }
         *cx.sel = crate::Selection { active: src.start, anchor: src.start, ranges: vec![target.union(&src)] };
         Ok(Json::Null)

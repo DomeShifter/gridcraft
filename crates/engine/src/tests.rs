@@ -6578,3 +6578,14 @@ fn history_charges_the_storage_of_empty_comment_replies() {
     // 500 replies of no text are still 500 elements.
     assert!(crate::sheet_text_bytes(&sheet) >= 500 * std::mem::size_of::<(String, String)>());
 }
+
+#[test]
+fn fill_down_carries_data_validation() {
+    // StarSheets: Ctrl+D (Fill Down) copies a drop-down rule to the filled cells, like the fill handle.
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["a"]]})).unwrap();
+    s.execute("data.validation", json!({"range": "A1", "type": "list", "formula1": "\"a,b\""})).unwrap();
+    s.execute("edit.fillDown", json!({"range": "A1:A4"})).unwrap();
+    let sh = s.doc().unwrap().wb.active().unwrap().clone();
+    assert!(sh.validations[0].ranges.iter().any(|r| r.a1() == "A1:A4"));
+}
