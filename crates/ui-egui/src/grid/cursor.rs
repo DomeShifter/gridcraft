@@ -50,7 +50,7 @@ pub(super) fn update_cursor(app: &mut SheetApp, ui: &egui::Ui, resp: &egui::Resp
 fn drag_cursor(drag: &Drag, rtl: bool) -> Option<CursorIcon> {
     match drag {
         Drag::None => None,
-        Drag::Select => Some(CursorIcon::Cell),
+        Drag::Select => Some(CursorIcon::Default),
         Drag::Rows(_) | Drag::Cols(_) | Drag::PointRows(_) | Drag::PointCols(_) => Some(CursorIcon::Default),
         Drag::Fill { .. } => Some(CursorIcon::Crosshair),
         Drag::Move { .. } | Drag::MoveCols { .. } | Drag::Object { handle: None, .. } => Some(CursorIcon::Move),
@@ -103,7 +103,8 @@ fn hover_cursor(app: &SheetApp, ctx: &egui::Context, resp: &egui::Response, poin
     } else if in_cells && app.editor.is_none() && on_cur_border {
         ctx.set_cursor_icon(CursorIcon::Move);
     } else if in_cells {
-        ctx.set_cursor_icon(CursorIcon::Cell);
+        // Sheets shows the plain arrow over cells, not a cell cross.
+        ctx.set_cursor_icon(CursorIcon::Default);
     } else if in_col_header {
         let col = geo.col_at(sh, p.x);
         let selected = sel.ranges.len() == 1 && sel.current().is_full_cols() && sel.current().contains(CellRef::new(0, col));

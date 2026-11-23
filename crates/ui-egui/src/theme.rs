@@ -95,6 +95,9 @@ pub struct Tokens {
     /// Google Sheets cell markers: a red corner on error cells, a black note corner and an
     /// orange comment corner, all top-right. Set by a host's palette; GridCraft's own is false.
     pub sheets_marks: bool,
+    /// Google Sheets formula bar: no cancel/enter buttons, and the Name Box and formula field
+    /// drawn without boxes, a divider after the Name Box. Set by a host's palette.
+    pub sheets_formula_bar: bool,
     pub warning_fill: Color32,
     pub warning_ink: Color32,
     /// Info-bar (notice strip) fills, by severity.
@@ -263,6 +266,7 @@ impl Tokens {
             shadow: pick(dark, Color32::from_black_alpha(40), Color32::from_black_alpha(90)),
             danger: pick(dark, Color32::from_rgb(0xC4, 0x2B, 0x1C), Color32::from_rgb(0xFF, 0x95, 0x85)),
             sheets_marks: false,
+            sheets_formula_bar: false,
             error_check_green: pick(dark, Color32::from_rgb(0x1E, 0x8E, 0x3E), Color32::from_rgb(0x4C, 0xC2, 0x6B)),
             warning_fill: Color32::from_rgb(0xF2, 0xB7, 0x05),
             warning_ink: Color32::BLACK,

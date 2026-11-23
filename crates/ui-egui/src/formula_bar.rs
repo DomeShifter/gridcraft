@@ -111,18 +111,27 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                 ui.add_space(4.0);
                 let editing = app.editor.is_some();
                 let c = if editing { t.text } else { t.text_disabled };
-                let cancel = crate::widgets::icon_button(ui, Icon::Close, c, "Cancel", vec2(22.0, 24.0));
-                if cancel.clicked() && editing {
-                    app.cancel_edit();
+                let mut buttons = Rect::NOTHING;
+                if t.sheets_formula_bar {
+                    // A thin divider between the Name Box and fx, as in Sheets.
+                    let (r, _) = ui.allocate_exact_size(vec2(1.0, 24.0), Sense::hover());
+                    ui.painter().vline(r.center().x, egui::Rangef::new(r.top() + 3.0, r.bottom() - 3.0), Stroke::new(1.0, t.gridline));
+                    ui.add_space(4.0);
+                } else {
+                    let cancel = crate::widgets::icon_button(ui, Icon::Close, c, "Cancel", vec2(22.0, 24.0));
+                    if cancel.clicked() && editing {
+                        app.cancel_edit();
+                    }
+                    if crate::widgets::icon_button(ui, Icon::Check, c, "Enter", vec2(22.0, 24.0)).clicked() && editing {
+                        app.commit_edit(0, 0, false, false);
+                    }
+                    buttons = cancel.rect;
                 }
-                if crate::widgets::icon_button(ui, Icon::Check, c, "Enter", vec2(22.0, 24.0)).clicked() && editing {
-                    app.commit_edit(0, 0, false, false);
-                }
-                let fx = crate::widgets::icon_button(ui, Icon::Fx, t.text, "Insert Function", vec2(26.0, 24.0));
+                let fx = crate::widgets::icon_button(ui, Icon::Fx, if t.sheets_formula_bar { t.text_dim } else { t.text }, "Insert Function", vec2(26.0, 24.0));
                 if fx.clicked() {
                     app.open_dialog("insertFunction", json!({}));
                 }
-                layout.buttons = cancel.rect.union(fx.rect);
+                layout.buttons = buttons.union(fx.rect);
                 if let Some(badge) = python_badge(app, ui, &t) {
                     layout.buttons = layout.buttons.union(badge);
                 }
@@ -130,8 +139,10 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                 // The formula field fills the rest, as tall as the bar.
                 let avail = ui.available_width() - 24.0;
                 let field = Rect::from_min_size(ui.cursor().min, vec2(avail, ui.available_height()));
-                ui.painter().rect_filled(field, 4.0, t.input_bg);
-                ui.painter().rect_stroke(field, 4.0, Stroke::new(1.0, t.input_border), StrokeKind::Inside);
+                if !t.sheets_formula_bar {
+                    ui.painter().rect_filled(field, 4.0, t.input_bg);
+                    ui.painter().rect_stroke(field, 4.0, Stroke::new(1.0, t.input_border), StrokeKind::Inside);
+                }
                 let inner = field.shrink2(vec2(6.0, 3.0));
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
                 let id = egui::Id::unique("gridcraft.formula_bar");
@@ -381,8 +392,10 @@ fn name_box(app: &mut SheetApp, ui: &mut egui::Ui, t: &Tokens) -> Rect {
     let shown = app.name_box_text();
     let mut text = app.name_box.clone().unwrap_or(shown.clone());
     let rect = Rect::from_min_size(ui.cursor().min, vec2(118.0, 24.0));
-    ui.painter().rect_filled(rect, 4.0, t.input_bg);
-    ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, t.input_border), StrokeKind::Inside);
+    if !t.sheets_formula_bar {
+        ui.painter().rect_filled(rect, 4.0, t.input_bg);
+        ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, t.input_border), StrokeKind::Inside);
+    }
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(rect.min + vec2(6.0, 3.0), vec2(96.0, 18.0))));
     // The box has no visible label of its own: screen readers and the strict accessibility check
     // need a name (egui 0.37 makes unnamed text inputs a test failure).
