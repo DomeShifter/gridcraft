@@ -282,6 +282,11 @@ pub struct GridState {
     pub renaming_tab: Option<usize>,
     pub rename_text: String,
     pub list_picker: Option<CellRef>,
+    /// The list row chosen with the arrow keys (Sheets: Enter opens a drop-down's list).
+    pub list_key: Option<usize>,
+    /// "Edit rule" was chosen at the bottom of a drop-down list: the host opens that cell's
+    /// data validation rule (StarSheets' side panel) and clears this.
+    pub edit_validation: Option<CellRef>,
     /// Open task pane: comments, watch, selection, formatChart.
     pub pane: Option<String>,
     /// Ink stroke being drawn (sheet points).

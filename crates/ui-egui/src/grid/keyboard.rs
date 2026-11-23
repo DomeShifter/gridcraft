@@ -20,6 +20,7 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
         || app.message.is_some()
         || app.grid.filter_menu.is_some()
         || app.grid.fill_menu.is_some()
+        || app.grid.list_picker.is_some()
         || matches!(app.grid.drag, Drag::Fill { menu: true, .. })
         || app.macros.question.is_some()
     {
@@ -113,7 +114,16 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
                         app.grid.ensure_visible = true;
                     }
                     Key::Enter => {
-                        if app.ui.sheets_keys && !shift && !m.alt && !m.ctrl {
+                        // Sheets: Enter on a drop-down cell opens its list (arrows and Enter pick).
+                        let dropdown = app.ui.sheets_keys && !shift && !m.alt && !m.ctrl && {
+                            let a = app.session.active().map(|d| d.selection.active).unwrap_or_default();
+                            super::editor::sheets_dropdown_hit(sh, geo, a).is_some()
+                        };
+                        if dropdown {
+                            let a = app.session.active().map(|d| d.selection.active).unwrap_or_default();
+                            app.grid.list_picker = Some(a);
+                            app.grid.list_key = None;
+                        } else if app.ui.sheets_keys && !shift && !m.alt && !m.ctrl {
                             app.begin_edit(None, false);
                             // The editor opened this frame reads the same input: take this Enter
                             // away, or it would commit straight away and move down.

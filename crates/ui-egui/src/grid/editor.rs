@@ -181,6 +181,21 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
         (true, true) => (geo.mirror_pos(r.left_top()), Align2::RIGHT_BOTTOM),
     };
     let mut close = false;
+    // Keyboard (Sheets): ↓ ↑ move through the choices (and the host's "Edit rule" row), Enter
+    // picks, Esc closes (see popup_dismissed).
+    let rows = items.len() + usize::from(look.is_some());
+    let (down, up, enter) = ui.input_mut(|i| {
+        (i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown), i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+    });
+    if rows > 0 && down {
+        app.grid.list_key = Some(app.grid.list_key.map_or(0, |k| (k + 1).min(rows - 1)));
+    }
+    if rows > 0 && up {
+        app.grid.list_key = Some(app.grid.list_key.map_or(0, |k| k.saturating_sub(1)));
+    }
+    let key = app.grid.list_key;
+    let mut chosen = if enter { key } else { None };
+    close |= enter && key.is_none();
     let response = egui::Area::new(egui::Id::unique("dv_list")).fixed_pos(at).pivot(pivot).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
         let frame = if look.is_some() { egui::Frame::menu(ui.style()) } else { egui::Frame::popup(ui.style()).inner_margin(2.0) };
         frame.show(ui, |ui| {
@@ -191,20 +206,42 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
             ui.set_min_width(width);
             let visibility = if look.is_some() { egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded } else { egui::scroll_area::ScrollBarVisibility::default() };
             egui::ScrollArea::vertical().max_height(height).min_scrolled_height(height).scroll_bar_visibility(visibility).show(ui, |ui| {
-                for it in &items {
+                for (k, it) in items.iter().enumerate() {
+                    let on = key == Some(k);
                     let row = match look {
-                        Some(l) => ui.add_sized([width, 32.0], (l.list_row)(it.as_str())),
-                        None => ui.add(egui::Button::new(it.as_str()).frame_when_inactive(false).min_size(vec2(width, LIST_PICKER_ROW_H))),
+                        Some(l) => ui.add_sized([width, 32.0], (l.list_row)(it.as_str()).selected(on)),
+                        None => ui.add(egui::Button::new(it.as_str()).frame_when_inactive(false).selected(on).min_size(vec2(width, LIST_PICKER_ROW_H))),
                     };
+                    if on && (up || down) {
+                        row.scroll_to_me(None);
+                    }
                     if row.clicked() {
-                        app.run_or_alert("cell.set", json!({"cell": c.a1(), "input": it}));
-                        close = true;
+                        chosen = Some(k);
                     }
                 }
             });
+            // Sheets: under the choices, a way to the rule itself.
+            if let Some(l) = look {
+                (l.sep)(ui);
+                if ui.add_sized([width, 32.0], (l.row)("Edit rule", "").selected(key == Some(items.len()))).clicked() {
+                    chosen = Some(items.len());
+                }
+            }
         });
     });
+    match chosen {
+        Some(k) if k < items.len() => {
+            app.run_or_alert("cell.set", json!({"cell": c.a1(), "input": items[k]}));
+            close = true;
+        }
+        Some(_) => {
+            app.grid.edit_validation = Some(c);
+            close = true;
+        }
+        None => {}
+    }
     if close || popup_dismissed(&response.response, was_open) {
         app.grid.list_picker = None;
+        app.grid.list_key = None;
     }
 }
