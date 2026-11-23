@@ -2,7 +2,7 @@ use gridcraft_engine::model::ObjKind;
 
 use super::geo::Geo;
 use super::interact::{col_edge, freeze_handles, hidden_col_edge, hidden_row_edge, on_border, row_edge};
-use super::{CellRef, Color32, CursorIcon, Drag, Pos2, RangeRef, Rect, Sheet, SheetApp, Stroke, pos2, vec2};
+use super::{CellRef, Color32, CursorIcon, Drag, Pos2, RangeRef, Rect, Sheet, SheetApp, Stroke, Tokens, pos2, vec2};
 
 /// Decide after interaction so drag start and release use the new state in the same frame.
 pub(super) fn update_cursor(app: &mut SheetApp, ui: &egui::Ui, resp: &egui::Response, geo: &Geo, sh: &Sheet) {
@@ -105,6 +105,13 @@ fn hover_cursor(app: &SheetApp, ctx: &egui::Context, resp: &egui::Response, poin
     } else if in_cells && app.editor.is_none() && on_cur_border {
         // Sheets: an open hand over the selection's edge (it can be dragged).
         ctx.set_cursor_icon(CursorIcon::Grab);
+    } else if in_cells
+        && app.editor.is_none()
+        && Tokens::get(ctx).sheets_marks
+        && super::editor::sheets_dropdown_hit(sh, geo, geo.cell_at(sh, p)).is_some_and(|r| r.contains(p))
+    {
+        // The ▾ of a drop-down cell opens its list on click: show that it is a button.
+        ctx.set_cursor_icon(CursorIcon::PointingHand);
     } else if in_cells {
         // Sheets shows the plain arrow over cells, not a cell cross.
         ctx.set_cursor_icon(CursorIcon::Default);

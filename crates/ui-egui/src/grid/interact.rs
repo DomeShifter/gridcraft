@@ -419,9 +419,13 @@ fn handle_press(app: &mut SheetApp, input: &InteractionInput<'_>) {
         return;
     }
     let c = geo.cell_at(sh, p);
-    // Sheets: the ▾ inside any drop-down cell selects that cell and opens its list.
+    // Sheets: a click on the ▾ inside any drop-down cell selects that cell and opens its list.
+    // Only a click: a drag that starts on the ▾ selects, fills or moves like anywhere else in
+    // the cell, and the fill handle (which overlaps the ▾ at the bottom-right) always wins.
     if Tokens::get(&resp.ctx).sheets_marks {
-        if let Some(r) = super::editor::sheets_dropdown_hit(sh, geo, c)
+        if primary_clicked
+            && !on_handle(p)
+            && let Some(r) = super::editor::sheets_dropdown_hit(sh, geo, c)
             && r.contains(p)
         {
             let _ = app.session.run("selection.set", json!({"range": c.a1()}));
