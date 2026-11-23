@@ -182,6 +182,38 @@ impl RangeRef {
             end: CellRef::new(self.end.row.min(o.end.row), self.end.col.min(o.end.col)),
         })
     }
+    /// Tidies a list of areas without changing which cells it covers: an area inside another
+    /// goes, and two areas that together make a rectangle become that rectangle (the same
+    /// columns with touching or overlapping rows, or the other way round). Long lists are left
+    /// as they are. (StarSheets: a rule filled down again and again listed `A2,A2:A28,…`.)
+    pub fn tidy(ranges: &mut Vec<RangeRef>) {
+        if ranges.len() > 500 {
+            return;
+        }
+        loop {
+            let n = ranges.len();
+            let inside = (0..n).find(|&i| (0..n).any(|j| j != i && ranges[j].contains_range(&ranges[i]) && (ranges[j] != ranges[i] || j < i)));
+            if let Some(i) = inside {
+                ranges.remove(i);
+                continue;
+            }
+            let joins = |a: &RangeRef, b: &RangeRef| {
+                let same_cols = a.start.col == b.start.col && a.end.col == b.end.col;
+                let same_rows = a.start.row == b.start.row && a.end.row == b.end.row;
+                (same_cols && a.start.row <= b.end.row.saturating_add(1) && b.start.row <= a.end.row.saturating_add(1))
+                    || (same_rows && a.start.col <= b.end.col.saturating_add(1) && b.start.col <= a.end.col.saturating_add(1))
+            };
+            let pair = (0..n).flat_map(|i| (i + 1..n).map(move |j| (i, j))).find(|&(i, j)| joins(&ranges[i], &ranges[j]));
+            match pair {
+                Some((i, j)) => {
+                    let u = ranges[i].union(&ranges[j]);
+                    ranges[i] = u;
+                    ranges.remove(j);
+                }
+                None => return,
+            }
+        }
+    }
     pub fn union(&self, o: &RangeRef) -> RangeRef {
         RangeRef {
             start: CellRef::new(self.start.row.min(o.start.row), self.start.col.min(o.start.col)),
@@ -319,6 +351,16 @@ pub fn split_areas(reference: &str) -> Vec<&str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tidy_merges_and_drops_covered_areas() {
+        let mut r: Vec<RangeRef> = ["A2", "A2:A28", "A2:B2", "B2:B28"].iter().map(|a| RangeRef::parse(a).unwrap()).collect();
+        RangeRef::tidy(&mut r);
+        assert_eq!(r.iter().map(|x| x.a1()).collect::<Vec<_>>(), vec!["A2:B28"]);
+        let mut apart: Vec<RangeRef> = ["A1:A3", "C1:C3"].iter().map(|a| RangeRef::parse(a).unwrap()).collect();
+        RangeRef::tidy(&mut apart);
+        assert_eq!(apart.len(), 2);
+    }
+
     use super::*;
 
     #[test]

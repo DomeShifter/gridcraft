@@ -48,6 +48,7 @@ fn extend_validations(sh: &mut gridcraft_model::Sheet, src: RangeRef, target: Ra
         let all = (src.start.row..=src.end.row).all(|r| (src.start.col..=src.end.col).all(|c| covers(CellRef::new(r, c))));
         if all && !v.ranges.iter().any(|r| r.contains(target.start) && r.contains(target.end)) {
             v.ranges.push(target);
+            RangeRef::tidy(&mut v.ranges);
         }
     }
 }

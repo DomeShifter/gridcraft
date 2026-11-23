@@ -48,6 +48,7 @@ fn sample() -> Workbook {
             indent: 1,
             rotation: -30,
             reading_order: Some(ReadingOrder::RightToLeft),
+            clip: false,
         };
         s.protection.locked = false;
     });

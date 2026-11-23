@@ -267,7 +267,8 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
             "conditionalFormatting" => read_cf(cx, e, &mut sheet, &mut cf_kept_cells),
             "dataValidations" => {
                 for v in e.kids("dataValidation") {
-                    if let Some(v) = read_validation(v) {
+                    if let Some(mut v) = read_validation(v) {
+                        RangeRef::tidy(&mut v.ranges);
                         sheet.validations.push(v);
                     }
                 }
@@ -435,7 +436,8 @@ pub(crate) fn password_attr(prefix: &str, base: &str) -> String {
 /// (or an unsupported algorithm), so it stays locked rather than open.
 fn read_protected_ranges(e: &El, sheet: &mut Sheet) {
     for p in e.kids("protectedRange") {
-        let ranges: Vec<RangeRef> = p.attr("sqref").unwrap_or("").split_whitespace().filter_map(RangeRef::parse).collect();
+        let mut ranges: Vec<RangeRef> = p.attr("sqref").unwrap_or("").split_whitespace().filter_map(RangeRef::parse).collect();
+        RangeRef::tidy(&mut ranges);
         if ranges.is_empty() {
             continue;
         }
@@ -861,7 +863,8 @@ fn read_ext(cx: &mut Ctx<'_>, e: &El, sheet: &mut Sheet) {
             match c.name.as_str() {
                 "dataValidations" => {
                     for v in c.kids("dataValidation") {
-                        if let Some(v) = read_validation(v) {
+                        if let Some(mut v) = read_validation(v) {
+                            RangeRef::tidy(&mut v.ranges);
                             sheet.validations.push(v);
                         }
                     }

@@ -100,6 +100,9 @@ pub(in super::super) fn remove_validation_cells(validations: &mut Vec<Validation
         }
     }
     validations.retain(|d| !d.ranges.is_empty());
+    for dv in validations.iter_mut() {
+        RangeRef::tidy(&mut dv.ranges);
+    }
 }
 
 pub(super) fn validation(s: &mut Session, p: &Json) -> Result<Json> {
@@ -175,7 +178,9 @@ pub(super) fn validation(s: &mut Session, p: &Json) -> Result<Json> {
     edit(s, |cx| {
         let sh = cx.sheet_mut(sheet)?;
         remove_validation_cells(&mut sh.validations, &ranges);
-        sh.validations.push(dv.clone());
+        let mut dv = dv.clone();
+        RangeRef::tidy(&mut dv.ranges);
+        sh.validations.push(dv);
         Ok(Json::Null)
     })
 }
