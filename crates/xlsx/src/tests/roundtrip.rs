@@ -429,6 +429,7 @@ fn sample() -> Workbook {
         source: None,
         by_rows: false,
         pivot: None,
+        point_colors: Vec::new(),
     };
     for kind in [
         ChartKind::ColumnClustered,

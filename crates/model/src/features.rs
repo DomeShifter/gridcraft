@@ -615,6 +615,10 @@ pub struct Chart {
     /// whenever the PivotTable is refreshed or its layout changes.
     #[serde(default)]
     pub pivot: Option<String>,
+    /// Pie and doughnut charts: a colour for each point (slice) of the first series, `None` for
+    /// the palette's (`c:dPt` in the file).
+    #[serde(default)]
+    pub point_colors: Vec<Option<Color>>,
 }
 
 impl Chart {
@@ -1149,6 +1153,7 @@ mod tests {
             source: None,
             by_rows: false,
             pivot: None,
+            point_colors: Vec::new(),
         };
         let mut json = serde_json::to_value(&chart).expect("serialize chart");
         json.as_object_mut().expect("chart object").remove("hole_size");

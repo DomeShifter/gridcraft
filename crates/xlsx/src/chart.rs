@@ -238,6 +238,19 @@ pub fn read_chart(root: &El) -> Option<Chart> {
             series.push(ser);
         }
     }
+    // Point colours (`c:dPt`) of the first series of a pie-like chart.
+    let mut point_colors: Vec<Option<Color>> = vec![];
+    if let Some(s) = first.kids("ser").next() {
+        for pt in s.kids("dPt") {
+            let Some(i) = pt.child("idx").and_then(|e| e.attr_u32("val")).map(|i| i as usize).filter(|i| *i < 4096) else { continue };
+            if let Some(c) = pt.path(&["spPr", "solidFill"]).and_then(dml_color) {
+                if point_colors.len() <= i {
+                    point_colors.resize(i + 1, None);
+                }
+                point_colors[i] = Some(c);
+            }
+        }
+    }
     let kind = if groups.len() > 1 { ChartKind::Combo } else { first_kind };
     let show_val = |e: &El| e.child("dLbls").is_some_and(|d| bool_val(d, "showVal"));
     let data_labels = groups.iter().any(|(g, _)| show_val(g) || g.kids("ser").any(show_val));
@@ -287,6 +300,7 @@ pub fn read_chart(root: &El) -> Option<Chart> {
         source: None,
         by_rows: false,
         pivot: root.path(&["pivotSource", "name"]).map(|n| strip_book(n.text.trim()).to_string()).filter(|n| !n.is_empty()),
+        point_colors,
     })
 }
 
@@ -536,7 +550,7 @@ fn multi_level_cat(f: &str, values: &str, wb: &Workbook, si: usize) -> Option<St
     Some(s)
 }
 
-fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String {
+fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize, points: &[Option<Color>]) -> String {
     let mut x = format!("<c:ser><c:idx val=\"{idx}\"/><c:order val=\"{idx}\"/>");
     if let Some(n) = &s.name {
         if is_ref(n) || is_defined_name(wb, si, n) {
@@ -569,6 +583,12 @@ fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String 
         G::Line { markers: false, .. } | G::Scatter { lines: true } | G::Stock => x.push_str("<c:marker><c:symbol val=\"none\"/></c:marker>"),
         G::Bubble => x.push_str("<c:invertIfNegative val=\"0\"/>"),
         _ => {}
+    }
+    // A pie or doughnut slice's own colour (`c:dPt`, after spPr and explosion).
+    for (j, c) in points.iter().enumerate() {
+        if let Some(c) = c.as_ref().and_then(|c| srgb(c, &wb.theme)) {
+            let _ = write!(x, "<c:dPt><c:idx val=\"{j}\"/><c:bubble3D val=\"0\"/><c:spPr><a:solidFill>{c}</a:solidFill></c:spPr></c:dPt>");
+        }
     }
     // Trendlines sit between dLbls and the data in CT_LineSer, CT_BarSer, CT_AreaSer,
     // CT_ScatterSer and CT_BubbleSer; pie and radar series have none.
@@ -669,7 +689,8 @@ fn dlbls(show: bool) -> String {
 }
 
 fn group_xml(g: G, series: &[(usize, &Series)], ch: &Chart, axes: (u32, u32), wb: &Workbook, si: usize) -> String {
-    let sers: String = series.iter().map(|(i, s)| series_xml(s, *i, g, wb, si)).collect();
+    let points = |i: usize| if i == 0 && matches!(g, G::Pie | G::Doughnut) { ch.point_colors.as_slice() } else { &[] };
+    let sers: String = series.iter().map(|(i, s)| series_xml(s, *i, g, wb, si, points(*i))).collect();
     let dl = dlbls(ch.data_labels);
     let ax = format!("<c:axId val=\"{}\"/><c:axId val=\"{}\"/>", axes.0, axes.1);
     match g {

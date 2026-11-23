@@ -146,6 +146,23 @@ pub(super) fn change_colors(s: &mut Session, p: &Json) -> Result<Json> {
         p.get("colors").and_then(Json::as_array).map(|a| a.iter().filter_map(|c| c.as_str().and_then(Color::from_hex)).collect());
     let palette = str_param(p, "palette").unwrap_or("colorful").to_string();
     with_chart(s, p, |c| {
+        // A pie or doughnut takes the scheme across its slices, each its own colour.
+        if matches!(c.kind, gridcraft_model::ChartKind::Pie | gridcraft_model::ChartKind::Doughnut) {
+            let n = c.series.first().map_or(0, |se| points_in(&se.values));
+            c.point_colors = (0..n)
+                .map(|i| match &explicit {
+                    Some(cols) if !cols.is_empty() => cols.get(i % cols.len()).copied(),
+                    _ => match palette.as_str() {
+                        "monochrome" => Some(Color::Theme(4, (-600 + (i as i16 * 1200 / n.max(1) as i16)).clamp(-800, 800))),
+                        p if p.starts_with("accent") => {
+                            let k: u8 = p.trim_start_matches("accent").parse().unwrap_or(1);
+                            Some(Color::Theme(3 + k.clamp(1, 6), (-600 + i as i16 * 1200 / n.max(1) as i16).clamp(-800, 800)))
+                        }
+                        _ => None,
+                    },
+                })
+                .collect();
+        }
         for (i, se) in c.series.iter_mut().enumerate() {
             se.color = match &explicit {
                 Some(cols) if !cols.is_empty() => cols.get(i % cols.len()).copied(),
@@ -253,11 +270,29 @@ pub(super) fn move_chart(s: &mut Session, p: &Json) -> Result<Json> {
 
 pub(super) fn format_series(s: &mut Session, p: &Json) -> Result<Json> {
     let idx = u32_param(p, "series").unwrap_or(0) as usize;
+    let point = u32_param(p, "point").map(|v| v as usize).filter(|v| *v < 4096);
     let color = str_param(p, "color").and_then(Color::from_hex);
     with_chart(s, p, |c| {
-        if let Some(se) = c.series.get_mut(idx) {
-            se.color = color;
+        match point {
+            // One slice of a pie or doughnut.
+            Some(j) => {
+                if c.point_colors.len() <= j {
+                    c.point_colors.resize(j + 1, None);
+                }
+                c.point_colors[j] = color;
+            }
+            None => {
+                if let Some(se) = c.series.get_mut(idx) {
+                    se.color = color;
+                }
+            }
         }
         Ok(())
     })
+}
+
+/// How many points a series formula covers (`Sheet1!$B$2:$B$7` → 6), at most 4096.
+fn points_in(formula: &str) -> usize {
+    let body = formula.trim_start_matches('=').rsplit('!').next().unwrap_or("").replace('$', "");
+    gridcraft_core::RangeRef::parse(&body).map_or(0, |r| (r.count() as usize).min(4096))
 }

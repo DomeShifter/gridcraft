@@ -412,7 +412,24 @@ pub fn resolve(wb: &Workbook, sheet: usize, chart: &Chart) -> ChartData {
     }
     let n = series.iter().map(|s| s.values.len()).max().unwrap_or(0);
     let categories = categories.unwrap_or_else(|| (1..=n).map(|i| i.to_string()).collect());
-    let palette = default_palette(&wb.theme, n.min(PALETTE_CYCLE));
+    let mut palette = default_palette(&wb.theme, n.min(PALETTE_CYCLE));
+    // Pie and doughnut slices with their own colour: the palette runs per point, and the first
+    // slice takes the series colour, so both carry the override.
+    if matches!(chart.kind, ChartKind::Pie | ChartKind::Doughnut) && chart.point_colors.iter().any(Option::is_some) {
+        let base = palette.clone();
+        palette = (0..n.min(4096))
+            .map(|j| {
+                chart.point_colors.get(j).and_then(|c| c.as_ref()).and_then(|c| c.resolve(&wb.theme)).map(|[r, g, b]| [r, g, b, 0xFF]).unwrap_or_else(|| {
+                    if base.is_empty() { series_color(&wb.theme, j) } else { base[j % base.len()] }
+                })
+            })
+            .collect();
+        if let (Some(first), Some(Some(c))) = (series.first_mut(), chart.point_colors.first()) {
+            if let Some([r, g, b]) = c.resolve(&wb.theme) {
+                first.color = [r, g, b, 0xFF];
+            }
+        }
+    }
     ChartData { categories, category_levels, series, palette }
 }
 
