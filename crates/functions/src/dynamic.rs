@@ -314,6 +314,46 @@ fn randarray(args: &[Arg], ctx: &mut dyn Ctx) -> R<Value> {
 // ---------------------------------------------------------------------------------------------
 // VSTACK / HSTACK / TOROW / TOCOL / WRAPROWS / WRAPCOLS
 
+/// Google Sheets' ARRAYFORMULA: its formula already works over ranges (dynamic arrays), so it
+/// returns the result as it is, and an array spills.
+fn arrayformula(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    let a = arr_arg(args, 0)?;
+    if a.rows == 1 && a.cols == 1 {
+        return Ok(a.data.first().cloned().unwrap_or(Value::Empty));
+    }
+    Ok(Value::from(a))
+}
+
+/// `{a, b}` in Google Sheets: parts side by side; they must have the same number of rows.
+fn array_row(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    let parts = (0..args.len()).map(|i| arr_arg(args, i)).collect::<R<Vec<_>>>()?;
+    let h = parts.first().map_or(0, |a| a.rows);
+    if parts.iter().any(|a| a.rows != h) {
+        return Err(CellError::Value);
+    }
+    let w: usize = parts.iter().map(|a| a.cols).sum();
+    check_output_size(h, w)?;
+    let rows = (0..h).map(|r| parts.iter().flat_map(|a| (0..a.cols).map(move |c| a.get(r, c).cloned().unwrap_or(Value::Empty))).collect()).collect();
+    from_rows(rows, &Value::Error(CellError::NA))
+}
+
+/// `{a; b}` in Google Sheets: rows one under another; they must have the same number of columns.
+fn array_literal(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    let parts = (0..args.len()).map(|i| arr_arg(args, i)).collect::<R<Vec<_>>>()?;
+    let w = parts.first().map_or(0, |a| a.cols);
+    if parts.iter().any(|a| a.cols != w) {
+        return Err(CellError::Value);
+    }
+    let mut rows = Vec::new();
+    for a in &parts {
+        rows.extend(rows_of(a));
+    }
+    if rows.len() == 1 && w == 1 {
+        return Ok(rows[0][0].clone());
+    }
+    from_rows(rows, &Value::Error(CellError::NA))
+}
+
 fn vstack(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     let mut rows = Vec::new();
     let mut total = 0usize;
@@ -1070,6 +1110,9 @@ pub(crate) fn specs() -> Vec<FnSpec> {
             randarray
         ),
         f!("VSTACK", 1, VAR, Lookup, A, "VSTACK(array1, [array2], ...)", "Stacks arrays on top of each other.", vstack),
+        f!("ARRAYFORMULA", 1, 1, Lookup, A, "ARRAYFORMULA(array_formula)", "Shows the values of a formula over ranges in the cells below and to the right (Google Sheets).", arrayformula),
+        f!("ARRAY_ROW", 1, VAR, Lookup, A, "ARRAY_ROW(value1, [value2], ...)", "One row of a {…} array literal: its parts side by side (Google Sheets).", array_row),
+        f!("ARRAY_LITERAL", 1, VAR, Lookup, A, "ARRAY_LITERAL(row1, [row2], ...)", "A {…} array literal: its rows one under another (Google Sheets).", array_literal),
         f!("HSTACK", 1, VAR, Lookup, A, "HSTACK(array1, [array2], ...)", "Places arrays side by side.", hstack),
         f!(
             "TOROW",

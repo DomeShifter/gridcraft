@@ -44,12 +44,12 @@ fn spanish_input_preserves_reference_and_array_syntax() {
     ] {
         assert_eq!(input(src), expected, "{src}");
     }
-    for bad in [r"SUMA({1;2\3})", "{SUMA(A1)}", "{FALSO;}"] {
+    // `{SUMA(A1)}` and `{VERDADERO}` are Google Sheets array literals (StarSheets patch 0022).
+    for bad in [r"SUMA({1;2\3})", "{FALSO;}"] {
         assert!(parse_input(bad, FormulaLocale::Es, |_| false).is_err(), "{bad}");
     }
     assert_eq!(print(&parse("SUMA(1,2)+FALSO").unwrap()), "SUMA(1,2)+FALSO");
     assert!(parse("SUM(1;2)").is_err());
-    assert!(parse("{VERDADERO}").is_err());
     // Real nesting past the parser's limit is still refused.
     let nested = "(".repeat(300) + "1" + &")".repeat(300);
     assert!(parse_input(&nested, FormulaLocale::Es, |_| false).is_err());

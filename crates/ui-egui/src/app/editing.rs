@@ -60,7 +60,11 @@ impl SheetApp {
             String::new()
         } else {
             match sh.cell(at) {
-                Some(c) if c.formula.is_some() => formula_locale::display(&c.input_text(), locale, &d.wb, d.wb.active_sheet()),
+                Some(c) if c.formula.is_some() => {
+                    let shown = formula_locale::display(&c.input_text(), locale, &d.wb, d.wb.active_sheet());
+                    // A legacy (Excel) array formula edits as ARRAYFORMULA(…) in Sheets mode.
+                    if self.ui.sheets_keys && c.formula.as_ref().is_some_and(|f| f.array.is_some()) { crate::formula_bar::sheets_array_wrap(&shown) } else { shown }
+                }
                 _ => gridcraft_engine::display::edit_text(&d.wb, sh, at),
             }
         };
@@ -142,6 +146,8 @@ impl SheetApp {
             Some(full) if !ed.python && full.to_lowercase().starts_with(&ed.text.to_lowercase()) => full.clone(),
             _ => ed.text.clone(),
         };
+        // Google Sheets: Ctrl+Shift+Enter wraps the formula in ARRAYFORMULA(…), not braces.
+        let (text, array) = if array && self.ui.sheets_keys { (crate::formula_bar::sheets_array_wrap(&text), false) } else { (text, array) };
         // F2 then Enter (or a file command) on an untouched draft: nothing to write.
         if !fill_selection && !array && ed.original.as_ref() == Some(&text) {
             if dr != 0 || dc != 0 {

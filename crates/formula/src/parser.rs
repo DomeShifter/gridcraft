@@ -423,7 +423,41 @@ impl Parser {
         Ok(Expr::Name(w.to_string()))
     }
 
+    /// `{…}`: an array constant (`{1,2;3,4}`), or else, as in Google Sheets, an array literal of
+    /// formulas and ranges (`{A1:A3, B1:B3}` side by side, `{A1:A3; B1:B3}` one under another),
+    /// kept as `ARRAY_LITERAL(ARRAY_ROW(…), …)` and printed back in braces.
     fn array(&mut self) -> Result<Expr, ParseError> {
+        let start = self.i;
+        match self.array_constant() {
+            Ok(e) => Ok(e),
+            // Only a non-constant inside makes it a Sheets array literal; a constant mistake
+            // (`{1,2;3}`, rows of different lengths) stays the constant's error.
+            Err(constant_error) if constant_error.msg.contains("may only contain constants") => {
+                self.i = start;
+                self.array_literal().map_err(|_| constant_error)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn array_literal(&mut self) -> Result<Expr, ParseError> {
+        let mut rows: Vec<Vec<Expr>> = vec![Vec::new()];
+        loop {
+            let el = self.expr(0, false)?;
+            if let Some(r) = rows.last_mut() {
+                r.push(el);
+            }
+            match self.next() {
+                Tok::Comma => {}
+                Tok::Semicolon => rows.push(Vec::new()),
+                Tok::RBrace => break,
+                t => return Err(self.err(format!("expected `,`, `;` or `}}`, found {}", describe(&t)))),
+            }
+        }
+        Ok(Expr::Call("ARRAY_LITERAL".into(), rows.into_iter().map(|r| Expr::Call("ARRAY_ROW".into(), r)).collect()))
+    }
+
+    fn array_constant(&mut self) -> Result<Expr, ParseError> {
         let mut rows = vec![Vec::new()];
         loop {
             let el = match self.next() {

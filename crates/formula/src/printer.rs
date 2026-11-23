@@ -327,6 +327,24 @@ fn write_expr(s: &mut String, e: &Expr, r1c1: Option<CellRef>) {
                 write_expr(s, right, r1c1);
             }
         }
+        // A Google Sheets array literal prints back as typed: `{A1:A3, B1:B3; C1:C3, D1:D3}`.
+        Expr::Call(name, rows) if name == "ARRAY_LITERAL" && rows.iter().all(|r| matches!(r, Expr::Call(n, _) if n == "ARRAY_ROW")) => {
+            s.push('{');
+            for (ri, row) in rows.iter().enumerate() {
+                if ri > 0 {
+                    s.push(';');
+                }
+                if let Expr::Call(_, els) = row {
+                    for (ci, el) in els.iter().enumerate() {
+                        if ci > 0 {
+                            s.push(',');
+                        }
+                        write_expr(s, el, r1c1);
+                    }
+                }
+            }
+            s.push('}');
+        }
         Expr::Call(name, args) => {
             s.push_str(name);
             s.push('(');

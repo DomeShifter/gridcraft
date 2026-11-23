@@ -144,7 +144,8 @@ fn precedence() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn errors() {
-    for bad in ["1+", "SUM(1,2", "(1", "{1,2;3}", "\"abc", "A1:", "1 2", "{A1}", ")", "Sheet1!", "#FOO!"] {
+    // `{A1}` is a Google Sheets array literal (StarSheets patch 0022), so it parses.
+    for bad in ["1+", "SUM(1,2", "(1", "{1,2;3}", "\"abc", "A1:", "1 2", ")", "Sheet1!", "#FOO!"] {
         assert!(parse(bad).is_err(), "{bad} should fail");
     }
 }

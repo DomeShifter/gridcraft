@@ -331,12 +331,27 @@ fn active_input(app: &SheetApp) -> String {
         return if let Some(f) = &c.formula {
             let shown = crate::formula_locale::display(&c.input_text(), app.ui.language.formula_locale(), &d.wb, d.wb.active_sheet());
             // A legacy array formula shows in braces (`{=A1:A2*2}`), as `Cell::bar_text` does.
-            if f.array.is_some() { format!("{{{shown}}}") } else { shown }
+            // In Sheets mode it shows as ARRAYFORMULA(…), the way Google Sheets writes it.
+            if f.array.is_some() && app.ui.sheets_keys {
+                sheets_array_wrap(&shown)
+            } else if f.array.is_some() {
+                format!("{{{shown}}}")
+            } else {
+                shown
+            }
         } else {
             gridcraft_engine::display::edit_text(&d.wb, sh, a)
         };
     }
     String::new()
+}
+
+/// `=X` as Google Sheets' `=ARRAYFORMULA(X)` (left as it is when it already is one, or isn't a formula).
+pub fn sheets_array_wrap(text: &str) -> String {
+    match text.strip_prefix('=') {
+        Some(body) if !body.trim_start().to_ascii_uppercase().starts_with("ARRAYFORMULA(") => format!("=ARRAYFORMULA({body})"),
+        _ => text.to_string(),
+    }
 }
 
 /// Ctrl+Alt+Shift+P, and Cmd+Option+Shift+P on macOS: Python mode on or off.
