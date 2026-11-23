@@ -289,6 +289,52 @@ fn lookup_function_shortcuts(ctx: LookupContext) -> Option<Shortcut> {
 
 /// AltGr arrives as Ctrl+Alt on Windows: a key that also typed a character (AltGr+= is `~` on a German
 /// layout; a user-defined Ctrl+Alt+A hotkey may type `ä`) is text, not a shortcut.
+/// Google Sheets' shortcuts where they differ from Excel's (host option `sheets_keys`, checked
+/// before the Excel table). From Google's list (support.google.com/docs/answer/181110).
+pub fn lookup_sheets(key: Key, physical: Option<Key>, m: Modifiers) -> Option<Shortcut> {
+    use Key::*;
+    let navigation = matches!(key, ArrowLeft | ArrowRight | ArrowUp | ArrowDown | PageUp | PageDown | Home | End);
+    let key = if navigation { key } else { physical.unwrap_or(key) };
+    let ctrl = m.ctrl || m.command;
+    let (alt, shift) = (m.alt, m.shift);
+    let fmt = |code: &str| Shortcut::Run("home.numberFormat", json!({ "code": code }));
+    Some(match (ctrl, alt, shift, key) {
+        // Format
+        (false, true, true, Num5) => run("home.strikethrough"),
+        (true, false, true, E) => run("home.alignCenter"),
+        (true, false, true, L) => run("home.alignLeft"),
+        (true, false, true, R) => run("home.alignRight"),
+        (false, true, true, Num1) => borders("top"),
+        (false, true, true, Num2) => borders("right"),
+        (false, true, true, Num3) => borders("bottom"),
+        (false, true, true, Num4) => borders("left"),
+        (false, true, true, Num6) => borders("none"),
+        (false, true, true, Num7) | (true, false, true, Num7) => borders("outside"),
+        (true, false, false, Backslash) => run("edit.clearFormats"),
+        (true, false, true, Num1) => fmt("#,##0.00"),
+        (true, false, true, Num2) => fmt("hh:mm:ss"),
+        (true, false, true, Num3) => fmt("dd/mm/yyyy"),
+        (true, false, true, Num4) => fmt("£#,##0.00"),
+        (true, false, true, Num5) => fmt("0.00%"),
+        (true, false, true, Num6) => fmt("0.00E+00"),
+        (true, true, false, T) => run("insert.table"),
+        // Sheets and rows/columns
+        (false, true, false, ArrowDown) => run("sheet.next"),
+        (false, true, false, ArrowUp) => run("sheet.previous"),
+        (true, true, false, Equals | Plus) => Shortcut::Dialog("insertCells", json!({})),
+        (true, true, false, Minus) => Shortcut::Dialog("deleteCells", json!({})),
+        (true, true, false, Num9) => run("home.hideRows"),
+        (true, false, true, Num9) => run("home.unhideRows"),
+        (true, true, false, Num0) => run("home.hideColumns"),
+        (true, false, true, Num0) => run("home.unhideColumns"),
+        // Notes and comments
+        (true, true, false, M) => Shortcut::Dialog("comment", json!({ "threaded": true })),
+        // F4 outside editing is Redo in Sheets (Excel: repeat last action).
+        (false, false, false, F4) => run("edit.redo"),
+        _ => return None,
+    })
+}
+
 pub(crate) fn altgr_text(ctx: &egui::Context, m: Modifiers, mac: bool) -> bool {
     !mac && m.alt && m.ctrl && ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Text(_))))
 }
@@ -299,7 +345,8 @@ pub(crate) fn dispatch(app: &mut SheetApp, ctx: &egui::Context, key: Key, physic
     if altgr_text(ctx, m, mac) {
         return false;
     }
-    let Some(shortcut) = lookup(key, physical, m, mac) else { return false };
+    let found = if app.ui.sheets_keys { lookup_sheets(key, physical, m).or_else(|| lookup(key, physical, m, mac)) } else { lookup(key, physical, m, mac) };
+    let Some(shortcut) = found else { return false };
     let (active, anchor) = app.session.active().map(|d| (d.selection.active, d.selection.anchor)).unwrap_or_default();
     match shortcut {
         Shortcut::Run(id, params) => {
