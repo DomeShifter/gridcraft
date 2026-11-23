@@ -304,9 +304,10 @@ pub fn lookup_sheets(key: Key, physical: Option<Key>, m: Modifiers) -> Option<Sh
     Some(match (ctrl, alt, shift, key) {
         // Format
         (false, true, true, Num5) => run("home.strikethrough"),
-        (true, false, true, E) => run("home.alignCenter"),
-        (true, false, true, L) => run("home.alignLeft"),
-        (true, false, true, R) => run("home.alignRight"),
+        // Sheets sets the alignment; pressing it again doesn't toggle back to General.
+        (true, false, true, E) => Shortcut::Run("home.alignCenter", json!({"on": true})),
+        (true, false, true, L) => Shortcut::Run("home.alignLeft", json!({"on": true})),
+        (true, false, true, R) => Shortcut::Run("home.alignRight", json!({"on": true})),
         (false, true, true, Num1) => borders("top"),
         (false, true, true, Num2) => borders("right"),
         (false, true, true, Num3) => borders("bottom"),
