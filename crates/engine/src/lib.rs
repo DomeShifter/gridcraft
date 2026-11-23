@@ -69,6 +69,9 @@ pub enum EngineError {
 
 pub type Result<T> = std::result::Result<T, EngineError>;
 
+/// Why an edit is refused while [`Session::read_only`] is on.
+pub const VIEW_ONLY: &str = "You can only view this spreadsheet. Ask its owner if you need to edit it.";
+
 /// A top-level command that changed a workbook, for a host that shares edits with other copies of
 /// the same workbook (live editing): what ran, where it ran (the sheet and selection before it),
 /// and the workbook before and after it. Collected in [`Session::sync_log`] while that is `Some`.
@@ -529,6 +532,9 @@ pub struct Session {
     /// While `Some`, every top-level command that changes a workbook adds a [`SyncStep`]; the
     /// host takes them (live editing). Commands nested in another are part of its step.
     pub sync_log: Option<Vec<SyncStep>>,
+    /// View only (a shared file the person may only view): commands that change a workbook are
+    /// refused with [`VIEW_ONLY`], and no cell editor opens ([`Session::locked_cell_message`]).
+    pub read_only: bool,
     /// The steps the last successful `automate.runScript` or `macro.run` ran while a recorder was
     /// on, for the recorder to keep with that step (see [`record::Recorder::ran`]); taken by the
     /// recording hook.
@@ -609,6 +615,9 @@ impl Session {
     /// is allowed. Front ends ask before opening an editor, so typing into a locked cell never
     /// leaves a draft that can't be entered (and so blocks saving).
     pub fn locked_cell_message(&self, sheet: usize, at: CellRef) -> Option<String> {
+        if self.read_only {
+            return Some(VIEW_ONLY.to_string());
+        }
         let d = self.active()?;
         let sh = d.wb.sheet(sheet)?;
         if !sh.is_protected() || !d.wb.styles.get(sh.style_id(at)).protection.locked {
@@ -707,6 +716,9 @@ impl Session {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         if let Err(why) = (spec.enabled)(self) {
             return Err(EngineError::Disabled(id.to_string(), why));
+        }
+        if self.read_only && spec.undoable {
+            return Err(EngineError::Disabled(id.to_string(), VIEW_ONLY.to_string()));
         }
         // A debugger whose undo group something else ended locks nothing any more (`macro.debug`
         // itself says that the run had ended).
