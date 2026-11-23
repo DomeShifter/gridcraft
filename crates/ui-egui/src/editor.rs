@@ -45,6 +45,9 @@ pub struct EditState {
     /// The fixed range anchor and its sheet while pointing with the mouse or keyboard.
     pub point_anchor: Option<(usize, CellRef)>,
     pub autocomplete: Vec<String>,
+    /// The suggestions in `autocomplete` that are named ranges, with what they refer to: they
+    /// are inserted without the `(` a function gets.
+    pub ac_names: Vec<(String, String)>,
     pub ac_index: usize,
     pub request_focus: bool,
     /// The text changed programmatically: push `caret` into the widget on the next frame.
@@ -92,6 +95,7 @@ impl EditState {
             point_cell: None,
             point_anchor: None,
             autocomplete: vec![],
+            ac_names: vec![],
             ac_index: 0,
             request_focus: true,
             sync_caret: true,
@@ -247,6 +251,7 @@ impl EditState {
     /// Updates function autocomplete for the word before the caret.
     pub fn update_autocomplete(&mut self, names: &[String]) {
         self.autocomplete.clear();
+        self.ac_names.clear();
         if self.python || !self.is_formula() {
             return;
         }
@@ -265,17 +270,52 @@ impl EditState {
         self.ac_index = self.ac_index.min(self.autocomplete.len().saturating_sub(1));
     }
 
-    /// Accepts the highlighted autocomplete entry: replaces the word and adds `(`.
+    /// Adds the workbook's named ranges (name, what it refers to) that start with the word before
+    /// the caret, ignoring case, ahead of the functions (as Google Sheets lists them).
+    pub fn add_name_suggestions(&mut self, defined: &[(String, String)]) {
+        if self.python || !self.is_formula() {
+            return;
+        }
+        let before = self.text.get(..self.byte_caret()).unwrap_or("");
+        let word: String =
+            before.chars().rev().take_while(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '_').collect::<String>().chars().rev().collect();
+        if word.is_empty() || word.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            return;
+        }
+        let u = word.to_ascii_uppercase();
+        let found: Vec<(String, String)> =
+            defined.iter().filter(|(n, _)| n.to_ascii_uppercase().starts_with(&u) && n.to_ascii_uppercase() != u).take(12).cloned().collect();
+        if found.is_empty() {
+            return;
+        }
+        let mut list: Vec<String> = found.iter().map(|(n, _)| n.clone()).collect();
+        let functions: Vec<String> = self.autocomplete.drain(..).filter(|f| !found.iter().any(|(n, _)| n.eq_ignore_ascii_case(f))).collect();
+        list.extend(functions);
+        list.truncate(12);
+        self.autocomplete = list;
+        self.ac_names = found;
+        self.ac_index = self.ac_index.min(self.autocomplete.len().saturating_sub(1));
+    }
+
+    /// What a suggested named range refers to, or None for a function.
+    pub fn suggested_name_refers_to(&self, entry: &str) -> Option<&str> {
+        self.ac_names.iter().find(|(n, _)| n == entry).map(|(_, f)| f.as_str())
+    }
+
+    /// Accepts the highlighted autocomplete entry: replaces the word and adds `(` (not for a
+    /// named range).
     pub fn accept_autocomplete(&mut self) -> bool {
         let Some(name) = self.autocomplete.get(self.ac_index).cloned() else { return false };
+        let paren = if self.suggested_name_refers_to(&name).is_some() { "" } else { "(" };
         let caret_b = self.byte_caret();
         let before = self.text.get(..caret_b).unwrap_or("");
         let wlen: usize = before.chars().rev().take_while(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '_').map(char::len_utf8).sum();
         let start = caret_b - wlen;
         let (Some(a), Some(b)) = (self.text.get(..start), self.text.get(caret_b..)) else { return false };
-        self.text = format!("{a}{name}({b}");
-        self.caret = self.text.get(..start + name.len() + 1).map(|s| s.chars().count()).unwrap_or(0);
+        self.text = format!("{a}{name}{paren}{b}");
+        self.caret = self.text.get(..start + name.len() + paren.len()).map(|s| s.chars().count()).unwrap_or(0);
         self.autocomplete.clear();
+        self.ac_names.clear();
         self.caret_to_end = false;
         self.sync_caret = true;
         true

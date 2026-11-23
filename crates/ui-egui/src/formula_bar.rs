@@ -623,6 +623,15 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
             })
             .collect();
         ed.update_autocomplete(&names);
+        // Named ranges the edited sheet can see (workbook-wide or its own), as suggestions too.
+        let defined: Vec<(String, String)> = app
+            .session
+            .active()
+            .map(|d| {
+                d.wb.names.iter().filter(|n| !n.hidden && n.scope.is_none_or(|s| s == ed.sheet)).map(|n| (n.name.clone(), n.formula.clone())).collect()
+            })
+            .unwrap_or_default();
+        ed.add_name_suggestions(&defined);
         app.session.mode = if ed.can_point() {
             gridcraft_engine::Mode::Point
         } else if ed.enter_mode {
@@ -1186,8 +1195,10 @@ fn show_editor_suggestions(ui: &mut egui::Ui, suggestion: EditorSuggestion<'_>) 
                     let mut pick = None;
                     for (i, n) in ed.autocomplete.iter().enumerate() {
                         let sel = i == ed.ac_index;
+                        // ƒ for a function, ▦ for a named range.
+                        let mark = if ed.suggested_name_refers_to(n).is_some() { "▦" } else { "ƒ" };
                         let r = ui.add(
-                            egui::Button::selectable(sel, egui::RichText::new(format!("ƒ  {n}")).font(theme::ui_font(12.5)))
+                            egui::Button::selectable(sel, egui::RichText::new(format!("{mark}  {n}")).font(theme::ui_font(12.5)))
                                 .min_size(vec2(220.0, 20.0)),
                         );
                         if r.clicked() {
@@ -1197,7 +1208,9 @@ fn show_editor_suggestions(ui: &mut egui::Ui, suggestion: EditorSuggestion<'_>) 
                             r.on_hover_text(desc);
                         }
                     }
-                    if let Some(desc) = ed.autocomplete.get(ed.ac_index).and_then(|n| crate::formula_locale::description(n, ed.locale, language)) {
+                    let picked = ed.autocomplete.get(ed.ac_index);
+                    let refers = picked.and_then(|n| ed.suggested_name_refers_to(n)).map(|f| format!("Named range: {f}"));
+                    if let Some(desc) = refers.or_else(|| picked.and_then(|n| crate::formula_locale::description(n, ed.locale, language))) {
                         ui.separator();
                         ui.add(egui::Label::new(egui::RichText::new(desc).small()).wrap());
                     }
