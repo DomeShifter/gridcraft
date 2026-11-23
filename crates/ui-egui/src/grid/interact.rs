@@ -522,9 +522,11 @@ fn handle_press(app: &mut SheetApp, input: &InteractionInput<'_>) {
             let _ = app.run("cell.toggleCheckbox", json!({"cell": c.a1()}));
         }
         // A click on a hyperlink's text follows it (like Excel); elsewhere in the cell selects.
+        // In Sheets mode a click only selects: the host shows a link card instead.
         if let Some(h) = sh.hyperlinks.get(&c).cloned()
             && acts
             && !mods.any()
+            && !app.ui.sheets_keys
         {
             let r = geo.cell_rect(sh, c);
             if p.x < r.left() + r.width() * 0.8 {
