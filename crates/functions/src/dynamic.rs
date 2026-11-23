@@ -314,6 +314,18 @@ fn randarray(args: &[Arg], ctx: &mut dyn Ctx) -> R<Value> {
 // ---------------------------------------------------------------------------------------------
 // VSTACK / HSTACK / TOROW / TOCOL / WRAPROWS / WRAPCOLS
 
+fn query(args: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    let data = arr_arg(args, 0)?;
+    let Value::Text(q) = &arg(args, 1)?.value else { return Err(CellError::Value) };
+    let headers = args.get(2).and_then(|a| a.value.as_f64()).map(|h| h as i64);
+    let first_col = args.get(3).and_then(|a| a.value.as_f64()).filter(|c| *c >= 0.0).map(|c| c as u32);
+    let out = sheets_functions::query(&data, q, headers, first_col, c.now_serial()).map_err(|_| CellError::Value)?;
+    if out.rows == 1 && out.cols == 1 {
+        return Ok(out.data.first().cloned().unwrap_or(Value::Empty));
+    }
+    Ok(Value::from(out))
+}
+
 /// Google Sheets' ARRAYFORMULA: its formula already works over ranges (dynamic arrays), so it
 /// returns the result as it is, and an array spills.
 fn arrayformula(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
@@ -1110,6 +1122,9 @@ pub(crate) fn specs() -> Vec<FnSpec> {
             randarray
         ),
         f!("VSTACK", 1, VAR, Lookup, A, "VSTACK(array1, [array2], ...)", "Stacks arrays on top of each other.", vstack),
+        // Google Sheets' QUERY (StarSheets crates/sheets-functions). The 4th argument is added by
+        // the calculator: the sheet column the data starts in, so `select C` means column C.
+        f!("QUERY", 2, 4, Lookup, A, "QUERY(data, query, [headers])", "Runs a Google Visualization API query (select, where, group by, pivot, order by, limit, label, format) over a range.", query),
         f!("ARRAYFORMULA", 1, 1, Lookup, A, "ARRAYFORMULA(array_formula)", "Shows the values of a formula over ranges in the cells below and to the right (Google Sheets).", arrayformula),
         f!("ARRAY_ROW", 1, VAR, Lookup, A, "ARRAY_ROW(value1, [value2], ...)", "One row of a {…} array literal: its parts side by side (Google Sheets).", array_row),
         f!("ARRAY_LITERAL", 1, VAR, Lookup, A, "ARRAY_LITERAL(row1, [row2], ...)", "A {…} array literal: its rows one under another (Google Sheets).", array_literal),

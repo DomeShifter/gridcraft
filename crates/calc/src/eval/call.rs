@@ -314,8 +314,17 @@ impl<'h> Evaluator<'h> {
             "PIVOTBY" => Some(3),
             _ => None,
         };
+        // QUERY: the sheet column its data range starts in (StarSheets), given as a 4th argument.
+        let mut query_first_col: Option<u32> = None;
         for (i, a) in args.iter().enumerate() {
             let mut ev = self.eval(a);
+            if spec.name == "QUERY"
+                && i == 0
+                && let Ev::R(areas) = &ev
+                && let [area] = areas.as_slice()
+            {
+                query_first_col = Some(area.range.start.col);
+            }
             if lambda_at == Some(i)
                 && let Ev::L(l) = &ev
             {
@@ -357,6 +366,12 @@ impl<'h> Evaluator<'h> {
             // Only an argument left out (`f(a,,b)`) is omitted; one that computes a blank is given.
             let blank_value = !from_ref && value == Value::Empty && lambda_at != Some(i) && !matches!(a, Expr::Missing);
             evaluated.push(Arg { value, from_ref, blank_value });
+        }
+        if spec.name == "QUERY" {
+            while evaluated.len() < 3 {
+                evaluated.push(Arg { value: Value::Empty, from_ref: false, blank_value: false });
+            }
+            evaluated.push(Arg::val(Value::number(query_first_col.map_or(-1.0, f64::from))));
         }
         // The function may go through every value it is given (a SUM inside each call of a
         // LAMBDA over a large array): the values count against the cell's work.
