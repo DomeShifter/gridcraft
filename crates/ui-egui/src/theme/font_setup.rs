@@ -486,7 +486,10 @@ pub fn pinned_font_definitions() -> FontDefinitions {
 /// installed, so cells set in them render with them; the rest fall back to the roles. The bound
 /// families are recorded in [`crate::fonts`] so [`cell_family`] only names a family egui has.
 pub fn font_definitions_with(language: crate::i18n::Language, used: &[String]) -> FontDefinitions {
-    let installed = crate::fonts::installed_among(used).into_iter().map(|family| {
+    // Families the host keeps bound whatever the workbook uses (e.g. font-menu previews).
+    let mut used = used.to_vec();
+    used.extend(crate::fonts::kept_families());
+    let installed = crate::fonts::installed_among(&used).into_iter().map(|family| {
         let faces = crate::fonts::faces_of(&family);
         (family, faces)
     });

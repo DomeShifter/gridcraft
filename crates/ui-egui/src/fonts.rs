@@ -60,6 +60,22 @@ pub fn add_web_face(family: &str, bold: bool, italic: bool, data: Vec<u8>) {
     WEB_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
+static KEPT: std::sync::RwLock<Vec<String>> = std::sync::RwLock::new(Vec::new());
+
+/// Keeps `families` bound in every font set, used by a workbook or not (a host's font menu draws
+/// each name in its own font). Add their faces with [`add_web_face`].
+pub fn keep_families(families: Vec<String>) {
+    if let Ok(mut k) = KEPT.write() {
+        *k = families;
+    }
+    WEB_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The families [`keep_families`] asked for.
+pub fn kept_families() -> Vec<String> {
+    KEPT.read().map(|k| k.clone()).unwrap_or_default()
+}
+
 /// Changes whenever [`add_web_face`] adds a face, so the app rebinds workbook fonts.
 pub fn web_generation() -> u64 {
     WEB_GENERATION.load(std::sync::atomic::Ordering::Relaxed)
