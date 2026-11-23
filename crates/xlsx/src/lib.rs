@@ -21,6 +21,7 @@ mod csv;
 mod drawing;
 mod feature_bags;
 mod fmla;
+mod host_data;
 mod ods;
 mod omml;
 mod package;

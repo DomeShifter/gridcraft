@@ -257,6 +257,8 @@ pub fn write_xlsx_named_with(wb: &Workbook, kind: XlsxKind, book_name: Option<&s
 }
 
 fn write_xlsx_inner(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>, functions: FunctionInfo) -> Result<Vec<u8>, IoError> {
+    let with_host = crate::host_data::with_part(wb);
+    let wb = with_host.as_ref().unwrap_or(wb);
     if wb.sheets.is_empty() {
         return Err(IoError::Format("a workbook needs at least one sheet".into()));
     }

@@ -6644,3 +6644,15 @@ fn google_only_formulas_save_in_googles_export_wrapper() {
         assert_eq!(v(&s, &c), want, "{c}");
     }
 }
+
+#[test]
+fn host_data_is_an_undoable_edit_and_saved_in_the_file() {
+    let mut s = s();
+    s.execute("workbook.setHostData", json!({"data": "{\"v\":1}"})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.host_data.as_deref(), Some("{\"v\":1}"));
+    let bytes = crate::io::save_bytes(&s.doc().unwrap().wb.clone(), "x.xlsx").unwrap();
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.host_data, None);
+    s.execute("file.open", json!({"name": "x", "base64": crate::io::base64_encode(&bytes)})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.host_data.as_deref(), Some("{\"v\":1}"));
+}

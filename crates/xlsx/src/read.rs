@@ -464,6 +464,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
         }
     }
     wb.preserved = kept.workbook(&mut cx, &wb_part, &wb_xml, &file_to_model);
+    wb.host_data = crate::host_data::take(&mut wb.preserved);
     if let Some(w) = cx.python.warning() {
         cx.warn(w);
     }

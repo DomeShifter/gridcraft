@@ -237,6 +237,11 @@ pub struct Workbook {
     /// which holds unmodelled parts), so it is saved to JSON as well as to XLSX.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub phonetics: Vec<PhoneticString>,
+    /// Data a host application keeps with the file for what the model has no place for (for
+    /// StarSheets, JSON text). Saved to JSON, and to XLSX as a custom XML part
+    /// (`urn:gridcraft:host-data:1`) that Excel and LibreOffice keep but don't show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_data: Option<String>,
     /// VBA project (`xl/vbaProject.bin`) carried through unchanged. GridCraft does not run
     /// macros; the blob is preserved so that saving a macro-enabled workbook never destroys the
     /// macros it arrived with. base64 in JSON. `None` = the workbook has no macros. Shared, so a
@@ -363,6 +368,7 @@ impl Workbook {
             custom_lists: vec![],
             cell_styles: vec![],
             phonetics: vec![],
+            host_data: None,
             vba_project: None,
             csv_delimiter: None,
             macros: crate::macros::Macros::default(),

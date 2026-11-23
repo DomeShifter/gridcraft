@@ -14,6 +14,16 @@ use super::{
 
 mod tabs;
 
+/// `workbook.setHostData`: the text a host application keeps with the file (see
+/// [`gridcraft_model::Workbook::host_data`]); an undoable edit like any other.
+fn set_host_data(s: &mut Session, p: &Json) -> Result<Json> {
+    let data = p.get("data").and_then(Json::as_str).map(str::to_string);
+    edit(s, |cx| {
+        cx.wb.host_data = data;
+        Ok(Json::Null)
+    })
+}
+
 use tabs::{activate, delete_sheet, hide_sheet, insert_sheet, move_sheet, rename_sheet, step_sheet, tab_color, unhide_sheet};
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -58,6 +68,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("home.deleteSheet", "Delete Sheet", ["Home", "Cells", "Delete"], None, "{sheet?}", has_doc, delete_sheet),
         cmd!("sheet.rename", "Rename Sheet", ["Home", "Cells", "Format"], None, "{sheet?, name}", has_doc, rename_sheet),
         cmd!("sheet.move", "Move or Copy Sheet…", ["Home", "Cells", "Format"], None, "{sheet?, to: index, copy?: bool}", has_doc, move_sheet),
+        cmd!(
+            "workbook.setHostData",
+            "Set Host Data",
+            [],
+            None,
+            "{data: string|null} (text a host application keeps with the file; saved in the .xlsx as a custom XML part)",
+            has_doc,
+            set_host_data
+        ),
         cmd!("sheet.tabColor", "Tab Color", ["Home", "Cells", "Format"], None, "{sheet?, color: \"#FF0000\"|\"none\"}", has_doc, tab_color),
         cmd!("sheet.hide", "Hide Sheet", ["Home", "Cells", "Format", "Hide & Unhide"], None, "{sheet?}", has_doc, hide_sheet),
         cmd!("sheet.unhide", "Unhide Sheet…", ["Home", "Cells", "Format", "Hide & Unhide"], None, "{sheet}", has_doc, unhide_sheet),
