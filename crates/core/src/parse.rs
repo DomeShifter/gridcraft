@@ -81,7 +81,7 @@ pub fn parse_input(s: &str, sys: DateSystem) -> Parsed {
     // A decimal comma (or the host's decimal mark): "1.234,5" reads as 1234.5.
     if let Some((decimal, group)) = number_separators()
         && t.contains(decimal)
-        && t.chars().all(|c| c.is_ascii_digit() || c == decimal || c == group || c == ' ' || c == '\u{a0}' || c == '\u{202f}' || "+-%£€$".contains(c))
+        && t.chars().all(|c| c.is_ascii_digit() || c == decimal || c == group || c == ' ' || c == '\u{a0}' || c == '\u{202f}' || "+-%£€$eE".contains(c))
     {
         let plain: String = t.chars().filter(|c| *c != group && *c != ' ' && *c != '\u{a0}' && *c != '\u{202f}').map(|c| if c == decimal { '.' } else { c }).collect();
         let p = parse_input(&plain, sys);
