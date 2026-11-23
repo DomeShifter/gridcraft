@@ -145,6 +145,10 @@ pub struct UiState {
     /// Set by a host; not persisted.
     #[serde(skip)]
     pub sheets_keys: bool,
+    /// A pasted picture goes inside the active cell (fitted to it) instead of floating over the
+    /// cells. Set by a host; not persisted.
+    #[serde(skip)]
+    pub paste_pictures_in_cell: bool,
     /// A host's own look for the cell and header menus (StarSheets: Google Sheets' rows with
     /// icons and shortcuts). Set by a host; not persisted.
     #[serde(skip)]
@@ -206,6 +210,7 @@ impl Default for UiState {
             status_bar: true,
             animations: true,
             sheets_keys: false,
+            paste_pictures_in_cell: false,
             menu_look: None,
             autocomplete: true,
             highlight_active_row: false,
