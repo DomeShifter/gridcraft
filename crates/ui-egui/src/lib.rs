@@ -32,6 +32,40 @@ pub mod editor;
 pub mod equation;
 mod floating_pictures;
 pub mod fonts;
+
+/// A host's spell check for text typed in a cell: words it doesn't know are underlined in red
+/// while editing (never in formulas, and not the word still being typed).
+pub mod spelling {
+    static HOOK: std::sync::OnceLock<fn(&str) -> bool> = std::sync::OnceLock::new();
+
+    /// Sets the check (`true` = the word is known). Call once.
+    pub fn set(known: fn(&str) -> bool) {
+        let _ = HOOK.set(known);
+    }
+
+    pub(crate) fn get() -> Option<fn(&str) -> bool> {
+        HOOK.get().copied()
+    }
+
+    /// The text cut into words and the rest, for underlining: (piece, is a word to check).
+    pub(crate) fn pieces(s: &str) -> Vec<(&str, bool)> {
+        let mut out = vec![];
+        let mut start = 0;
+        let mut in_word = false;
+        for (i, c) in s.char_indices() {
+            let w = c.is_alphabetic() || (in_word && c == '\'');
+            if w != in_word && i > start {
+                out.push((&s[start..i], in_word));
+                start = i;
+            }
+            in_word = w;
+        }
+        if start < s.len() {
+            out.push((&s[start..], in_word));
+        }
+        out
+    }
+}
 pub mod form_controls;
 pub mod formula_bar;
 mod formula_locale;

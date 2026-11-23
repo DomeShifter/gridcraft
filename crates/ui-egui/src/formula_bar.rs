@@ -554,6 +554,29 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
     let reading_order = cell_reading_order(app, ed.sheet, ed.cell);
     let mut layouter = move |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| {
         let s = buf.as_str();
+        // Plain text with a host spell check: unknown words underlined in red (not the last
+        // word while it's still being typed).
+        if !s.trim_start().starts_with('=')
+            && let Some(known) = crate::spelling::get()
+        {
+            let mut job = egui::text::LayoutJob {
+                direction: crate::text_direction::cell_direction(reading_order, s),
+                keep_trailing_whitespace: true,
+                ..Default::default()
+            };
+            let pieces = crate::spelling::pieces(s);
+            let last = pieces.len().saturating_sub(1);
+            for (i, (piece, word)) in pieces.into_iter().enumerate() {
+                let mut f = egui::TextFormat::simple(font2.clone(), cell_text_color);
+                let typing = i == last;
+                if word && !typing && piece.chars().count() > 1 && !known(piece) {
+                    f.underline = egui::Stroke::new(1.5, egui::Color32::from_rgb(0xD9, 0x30, 0x25));
+                }
+                job.append(piece, 0.0, f);
+            }
+            job.wrap.max_width = if multiline { wrap_width } else { f32::INFINITY };
+            return ui.fonts_mut(|f| f.layout_job(job));
+        }
         let mut job = egui::text::LayoutJob {
             direction: crate::text_direction::cell_direction(reading_order, s),
             keep_trailing_whitespace: true,
