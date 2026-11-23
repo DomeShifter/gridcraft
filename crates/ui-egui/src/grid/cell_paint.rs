@@ -266,6 +266,14 @@ pub(crate) fn paint_border(p: &Painter, pts: [Pos2; 2], style: BorderStyle, col:
             p.extend(egui::Shape::dotted_line(&[a, b], col, 2.0, w * 0.5));
         }
         _ => {
+            // A line wider than a pixel is carried on by half its width at each end (a square cap),
+            // so a thick outline's four sides meet at the corners instead of leaving a notch.
+            let (a, b) = if w > 1.0 && a != b {
+                let d = (b - a).normalized() * (w / 2.0);
+                (a - d, b + d)
+            } else {
+                (a, b)
+            };
             p.line_segment([a, b], Stroke::new(w, col));
         }
     }
