@@ -160,8 +160,9 @@ pub(crate) fn paint_selection(input: SelectionPaintInput<'_>) {
         let x = geo.x(sh, *before);
         p.line_segment([pos2(x, geo.rect.top()), pos2(x, geo.rect.bottom())], Stroke::new(3.0, t.accent));
     }
-    // Marching ants around the copied range.
-    if let Some(clip) = &app.session.clipboard
+    // Marching ants around the copied range (not in Sheets mode: StarSheets shows no copy outline).
+    if !app.ui.sheets_keys
+        && let Some(clip) = &app.session.clipboard
         && app.session.active().is_some_and(|d| d.uid == clip.doc_uid && d.wb.active_sheet() == clip.sheet)
         && range_in_pane(clip.range, rows, cols)
     {

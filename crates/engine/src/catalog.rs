@@ -49,6 +49,7 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
     ("home.wrapText", "Home", "Alignment", "Wrap Text"),
     ("home.mergeCenter", "Home", "Alignment", "Merge & Center"),
     ("home.mergeAcross", "Home", "Alignment", "Merge Across"),
+    ("home.mergeDown", "Home", "Alignment", "Merge Vertically"),
     ("home.mergeCells", "Home", "Alignment", "Merge Cells"),
     ("home.unmergeCells", "Home", "Alignment", "Unmerge Cells"),
     ("home.numberFormat", "Home", "Number", "Number Format"),

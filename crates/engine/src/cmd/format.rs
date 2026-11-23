@@ -130,6 +130,8 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!("home.mergeCenter", "Merge & Center", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| merge(s, p, "center")),
         cmd!("home.mergeAcross", "Merge Across", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| merge(s, p, "across")),
+        // StarSheets: Google Sheets' "Merge vertically", each column of the selection on its own.
+        cmd!("home.mergeDown", "Merge Vertically", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| merge(s, p, "down")),
         cmd!("home.mergeCells", "Merge Cells", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| merge(s, p, "cells")),
         cmd!("home.unmergeCells", "Unmerge Cells", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| merge(s, p, "unmerge")),
         // Number
@@ -653,6 +655,23 @@ fn merge(s: &mut Session, p: &Json, how: &str) -> Result<Json> {
                         if !m.is_single() {
                             sh.merges.push(m);
                             // As below: only the first value of each row survives.
+                            let others: Vec<CellRef> = sh.cells.iter_range(m).map(|(c, _)| c).filter(|c| *c != m.start).collect();
+                            for c in others {
+                                if let Some(mut cell) = sh.cells.get(c).cloned() {
+                                    cell.clear_content();
+                                    sh.set_cell(c, cell);
+                                }
+                                touched.push((sheet, c));
+                            }
+                        }
+                    }
+                }
+                "down" => {
+                    for col in r.start.col..=r.end.col {
+                        let m = RangeRef::new(CellRef::new(r.start.row, col), CellRef::new(r.end.row, col));
+                        if !m.is_single() {
+                            sh.merges.push(m);
+                            // Only the top value of each column survives.
                             let others: Vec<CellRef> = sh.cells.iter_range(m).map(|(c, _)| c).filter(|c| *c != m.start).collect();
                             for c in others {
                                 if let Some(mut cell) = sh.cells.get(c).cloned() {

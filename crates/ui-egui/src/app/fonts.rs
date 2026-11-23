@@ -13,7 +13,7 @@ impl SheetApp {
         self.fonts_set = true;
         self.fonts_rebind = false;
         self.fonts_han = Some(theme::HanOrder::of(self.ui.language));
-        self.fonts_bound = self.used_fonts();
+        self.fonts_bound = fonts::installed_among(&self.used_fonts());
         self.fonts_seen = self.fonts_key();
     }
 
@@ -105,12 +105,15 @@ impl SheetApp {
         let used = self.used_fonts();
         self.fonts_seen = seen;
         let generation = fonts::web_generation();
-        if used == self.fonts_bound && generation == self.fonts_web_seen {
+        // Compare the families there are faces for, not the raw list: every new style (a font
+        // size change) repeats a name there, and rebuilding the font set skips a frame (a flash).
+        let bindable = fonts::installed_among(&used);
+        if bindable == self.fonts_bound && generation == self.fonts_web_seen {
             return;
         }
         self.fonts_web_seen = generation;
         ctx.set_fonts(theme::font_definitions_with(self.ui.language, &used));
-        self.fonts_bound = used;
+        self.fonts_bound = bindable;
         self.fonts_rebind = true;
         ctx.request_repaint();
     }
