@@ -371,6 +371,11 @@ pub struct Alignment {
     /// Unspecified inherits in differential styles and uses context for ordinary cells.
     #[serde(default)]
     pub reading_order: Option<ReadingOrder>,
+    /// Google Sheets' "Clip" text wrapping: one line, cut off at the cell's edge instead of
+    /// running into empty neighbours. Excel has no such setting, so files don't store it (a host
+    /// keeps it its own way, StarSheets).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub clip: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

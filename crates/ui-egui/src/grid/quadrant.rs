@@ -463,7 +463,7 @@ fn paint_cell(q: &QuadrantPaint<'_>, painted: &(CellRef, Rect, Look, Option<CfLo
     // Overflow into empty neighbours for text (not upright text, whose width is its line height).
     let mut clip = *rect;
     let overflows = text_overflows_cell(numeric, &v, st.align.rotation, w, rect.width(), pad);
-    if should_expand_text(filter_space, overflows, across_end, c.col, in_merge(c).is_some()) {
+    if !st.align.clip && should_expand_text(filter_space, overflows, across_end, c.col, in_merge(c).is_some()) {
         let mut right = rect.right();
         let mut left = rect.left();
         if across_end > c.col {

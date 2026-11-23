@@ -275,6 +275,7 @@ fn read_alignment(a: &El) -> Alignment {
             Some(2) => Some(ReadingOrder::RightToLeft),
             _ => None,
         },
+        clip: false,
     };
     if let Some(r) = a.attr_i64("textRotation") {
         al.rotation = match r {

@@ -6662,3 +6662,19 @@ fn host_data_is_an_undoable_edit_and_saved_in_the_file() {
     s.execute("file.open", json!({"name": "x", "base64": crate::io::base64_encode(&bytes)})).unwrap();
     assert_eq!(s.doc().unwrap().wb.host_data.as_deref(), Some("{\"v\":1}"));
 }
+
+#[test]
+fn overflow_wrap_and_clip_are_one_choice() {
+    let mut s = s();
+    let al = |s: &Session| {
+        let d = s.doc().unwrap();
+        let st = d.wb.styles.get(d.wb.active().unwrap().style_id(CellRef::new(0, 0))).clone();
+        (st.align.wrap, st.align.clip)
+    };
+    s.execute("home.wrapText", json!({"range": "A1", "on": false, "clip": true})).unwrap();
+    assert_eq!(al(&s), (false, true));
+    s.execute("home.wrapText", json!({"range": "A1", "on": true})).unwrap();
+    assert_eq!(al(&s), (true, false));
+    s.execute("home.wrapText", json!({"range": "A1", "on": false})).unwrap();
+    assert_eq!(al(&s), (false, false));
+}

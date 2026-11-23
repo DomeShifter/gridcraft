@@ -103,12 +103,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("home.alignTop", "Top Align", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| valign(s, p, VAlign::Top)),
         cmd!("home.alignMiddle", "Middle Align", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| valign(s, p, VAlign::Center)),
         cmd!("home.alignBottom", "Bottom Align", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| valign(s, p, VAlign::Bottom)),
-        cmd!("home.wrapText", "Wrap Text", ["Home", "Alignment"], None, "{range?, on?}", has_doc, |s, p| toggle(
-            s,
-            p,
-            |st| st.align.wrap,
-            |st, v| st.align.wrap = v
-        )),
+        cmd!("home.wrapText", "Wrap Text", ["Home", "Alignment"], None, "{range?, on?, clip?} (clip: Google Sheets' Clip, one line cut off at the cell's edge; wrapping and clipping exclude each other)", has_doc, wrap_text),
         cmd!("home.shrinkToFit", "Shrink to Fit", [], None, "{range?, on?}", has_doc, |s, p| toggle(
             s,
             p,
@@ -316,6 +311,26 @@ pub(crate) fn active_style(s: &Session) -> Result<Style> {
     let d = s.doc()?;
     let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
     Ok(d.wb.styles.get(sh.style_id(d.selection.active)).clone())
+}
+
+/// Overflow (`on: false`), Wrap (`on: true`) or Clip (`clip: true`): one choice of the three.
+fn wrap_text(s: &mut Session, p: &Json) -> Result<Json> {
+    if bool_param(p, "clip") == Some(true) {
+        apply_style(s, p, |st| {
+            st.align.wrap = false;
+            st.align.clip = true;
+        })?;
+        return Ok(json!({"on": false, "clip": true}));
+    }
+    let on = match bool_param(p, "on") {
+        Some(v) => v,
+        None => !active_style(s)?.align.wrap,
+    };
+    apply_style(s, p, |st| {
+        st.align.wrap = on;
+        st.align.clip = false;
+    })?;
+    Ok(json!({"on": on}))
 }
 
 fn toggle(s: &mut Session, p: &Json, get: fn(&Style) -> bool, set: fn(&mut Style, bool)) -> Result<Json> {
