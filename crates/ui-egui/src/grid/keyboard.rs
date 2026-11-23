@@ -107,13 +107,18 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
                         app.grid.ensure_visible = true;
                     }
                     // Excel: Enter while a copied range is marked pastes it and ends copy mode.
-                    Key::Enter if !m.alt && !m.ctrl && !shift && !cmd && app.session.clipboard.is_some() => {
+                    Key::Enter if !m.alt && !m.ctrl && !shift && !cmd && app.session.clipboard.is_some() && !app.ui.sheets_keys => {
                         app.run_or_alert("edit.paste", json!({}));
                         app.session.clipboard = None;
                         app.grid.ensure_visible = true;
                     }
                     Key::Enter => {
-                        if m.alt || m.ctrl {
+                        if app.ui.sheets_keys && !shift && !m.alt && !m.ctrl {
+                            app.begin_edit(None, false);
+                            // The editor opened this frame reads the same input: take this Enter
+                            // away, or it would commit straight away and move down.
+                            ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Enter, .. })));
+                        } else if m.alt || m.ctrl {
                             app.begin_edit(None, false);
                         } else {
                             app.move_after_enter(if shift { -1 } else { 1 }, 0);
@@ -126,9 +131,9 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
                     Key::Delete => app.run_or_alert("edit.clearContents", json!({})),
                     Key::Backspace if app.delete_selected_object() => {}
                     Key::Backspace => {
-                        // Excel for Mac: Delete clears the cell and starts editing it.
+                        // Excel for Mac: Delete clears the cell and starts editing it (Sheets: only clears).
                         app.run_or_alert("edit.clearContents", json!({}));
-                        if app.session.active().is_some_and(|d| d.selection.is_single_cell()) {
+                        if !app.ui.sheets_keys && app.session.active().is_some_and(|d| d.selection.is_single_cell()) {
                             app.begin_edit(Some(String::new()), false);
                         }
                     }

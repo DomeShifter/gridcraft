@@ -258,7 +258,7 @@ fn vertical_scroll_track(available: Rect, grid: Rect, rtl: bool) -> (f32, f32) {
 fn update_clipboard_repaint(app: &mut SheetApp, ui: &egui::Ui, now: f64) {
     if app.session.clipboard.is_some() {
         // By the clock, not per frame: a gliding outline repaints more often than the ants step.
-        app.grid.marching_phase = crate::selection_glide::ants_phase(now);
+        app.grid.marching_phase = if app.ui.sheets_keys { 0.0 } else { crate::selection_glide::ants_phase(now) };
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(60));
     }
 }

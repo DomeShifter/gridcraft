@@ -97,6 +97,11 @@ pub struct UiState {
     pub status_bar: bool,
     /// Motion in the UI: the selection outline glides to a new selection (View ▸ Animations).
     pub animations: bool,
+    /// Google Sheets cell keys instead of Excel's: Enter on a selected cell starts editing,
+    /// Backspace only clears, Enter never pastes a copied range, the copy outline doesn't move.
+    /// Set by a host; not persisted.
+    #[serde(skip)]
+    pub sheets_keys: bool,
     /// Enable AutoComplete for cell values (File ▸ Options ▸ Editing): typed text is completed
     /// from the one matching entry in the same column.
     pub autocomplete: bool,
@@ -153,6 +158,7 @@ impl Default for UiState {
             formula_bar_lines: formula_bar::MAX_LINES,
             status_bar: true,
             animations: true,
+            sheets_keys: false,
             autocomplete: true,
             highlight_active_row: false,
             autosave: false,
