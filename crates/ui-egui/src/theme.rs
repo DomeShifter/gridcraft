@@ -42,6 +42,15 @@ use font_setup::{candidates, craft_font_faces, font_definitions_impl, try_load};
 #[cfg(test)]
 pub(crate) use font_setup::{drop_unparseable_fonts, font_parses};
 
+const TOKEN_OVERRIDE_ID: &str = "gridcraft.theme.token_override";
+
+/// A host's replacement palettes, kept in the egui context (`Tokens::install`).
+#[derive(Clone, Copy, Debug)]
+struct TokenOverride {
+    light: Tokens,
+    dark: Tokens,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
     pub dark: bool,
@@ -297,7 +306,33 @@ impl Tokens {
     }
 
     pub fn get(ctx: &egui::Context) -> Tokens {
-        if ctx.global_style().visuals.dark_mode { Tokens::dark() } else { Tokens::light() }
+        Tokens::for_mode(ctx, ctx.global_style().visuals.dark_mode)
+    }
+
+    /// The palette for one mode: a host's override (`install`) when it set one, else GridCraft's.
+    pub fn for_mode(ctx: &egui::Context, dark: bool) -> Tokens {
+        match ctx.data(|d| d.get_temp::<TokenOverride>(egui::Id::new(TOKEN_OVERRIDE_ID))) {
+            Some(o) => {
+                if dark {
+                    o.dark
+                } else {
+                    o.light
+                }
+            }
+            None => {
+                if dark {
+                    Tokens::dark()
+                } else {
+                    Tokens::light()
+                }
+            }
+        }
+    }
+
+    /// Lets a host replace the light and dark palettes (start from `Tokens::light()` /
+    /// `Tokens::dark()` and change fields). Call `apply` afterwards so egui's visuals follow.
+    pub fn install(ctx: &egui::Context, light: Tokens, dark: Tokens) {
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(TOKEN_OVERRIDE_ID), TokenOverride { light, dark }));
     }
 
     /// One colour of the category palette.
@@ -332,7 +367,7 @@ pub fn apply(ctx: &egui::Context, dark: bool) {
     // Install both palettes before System can switch between the style slots.
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let dark = theme == egui::Theme::Dark;
-        let t = if dark { Tokens::dark() } else { Tokens::light() };
+        let t = Tokens::for_mode(ctx, dark);
         let mut v = if dark { Visuals::dark() } else { Visuals::light() };
         v.panel_fill = t.window;
         v.window_fill = t.menu_bg;
