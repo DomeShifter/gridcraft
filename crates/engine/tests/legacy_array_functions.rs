@@ -97,7 +97,11 @@ fn array_call(spec: &FnSpec) -> Option<String> {
 /// Every library function with an array result, as a sample call, and the functions the
 /// evaluator implements itself that return several values or a range.
 fn array_calls() -> Vec<String> {
-    let mut calls: Vec<String> = gridcraft_functions::all().iter().filter_map(array_call).collect();
+    // Google-only functions (StarSheets) always spill, as in Google Sheets: an Excel file cannot
+    // hold them as legacy formulas (Google's export wraps them in __xludf.DUMMYFUNCTION).
+    const GOOGLE_ONLY: [&str; 4] = ["SORTN(", "ARRAYFORMULA(", "ARRAY_ROW(", "ARRAY_LITERAL("];
+    let mut calls: Vec<String> =
+        gridcraft_functions::all().iter().filter_map(array_call).filter(|c| !GOOGLE_ONLY.iter().any(|g| c.starts_with(g))).collect();
     for found in ["MUNIT", "MODE.MULT", "TEXTSPLIT", "REGEXEXTRACT", "MMULT", "SEQUENCE"] {
         assert!(calls.iter().any(|c| c.starts_with(&format!("{found}("))), "{found} not found: {calls:?}");
     }

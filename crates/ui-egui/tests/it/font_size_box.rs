@@ -79,12 +79,12 @@ fn out_of_range_or_not_a_number_changes_nothing() {
     type_size(&mut h, "500");
     let (_, text) = h.state().message.clone().expect("500 is refused with a message");
     assert!(text.contains("between 1 and 409"), "{text}");
-    assert_eq!(size(&h, "A1"), 11.0);
+    assert_eq!(size(&h, "A1"), 10.0);
 
     let mut h = harness();
     type_size(&mut h, "abc");
     assert!(h.state().message.is_none());
-    assert_eq!(size(&h, "A1"), 11.0, "text that is not a number reverts");
+    assert_eq!(size(&h, "A1"), 10.0, "text that is not a number reverts");
 }
 
 #[test]
@@ -101,8 +101,8 @@ fn escape_cancels_the_typed_size() {
     h.run_steps(1);
     key(&mut h, Key::Escape);
     h.run_steps(3);
-    assert_eq!(size(&h, "A1"), 11.0);
-    assert!(h.get_all_by_role(Role::TextInput).any(|n| n.value().as_deref() == Some("11")), "the box shows the cell's size again");
+    assert_eq!(size(&h, "A1"), 10.0);
+    assert!(h.get_all_by_role(Role::TextInput).any(|n| n.value().as_deref() == Some("10")), "the box shows the cell's size again");
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn the_arrow_opens_the_plain_list_of_sizes() {
     key(&mut h, Key::ArrowDown);
     key(&mut h, Key::Enter);
     h.run_steps(3);
-    assert_eq!(size(&h, "A1"), 12.0, "Down from 11 then Enter picks 12");
+    assert_eq!(size(&h, "A1"), 11.0, "Down from 10 (StarSheets' default) then Enter picks 11");
 }
 
 /// The on-screen box of the painted text `text` that overlaps `within`. The grid's row headers
@@ -148,8 +148,9 @@ fn painted_text(h: &Harness, text: &str, within: Rect) -> Rect {
 fn the_size_is_vertically_centered_in_its_box() {
     let h = harness();
     let field = h.get_by_role_and_label(Role::TextInput, "Font Size").rect();
-    let value = painted_text(&h, "11", field);
-    let name = painted_text(&h, "Calibri", Rect::EVERYTHING);
+    // StarSheets' default size is 10 pt.
+    let value = painted_text(&h, "10", field);
+    let name = painted_text(&h, gridcraft_engine::model::DEFAULT_FONT, Rect::EVERYTHING);
     assert!((value.center().y - field.center().y).abs() <= 1.0, "the size is centered in its box: {value:?} in {field:?}");
     assert!((value.center().y - name.center().y).abs() <= 1.0, "the size is on the Font name's baseline: {value:?} against {name:?}");
 }

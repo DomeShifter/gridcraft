@@ -443,9 +443,8 @@ mod tests {
             "IFERROR(__xludf.DUMMYFUNCTION(\"SUM(\"),5)",
             "IFERROR(__xludf.DUMMYFUNCTION(\"1+\"),5)+1",
             // Google-only functions: GridCraft would show #NAME? instead of the cached value.
+            // (StarSheets knows ARRAYFORMULA and QUERY: those are unwrapped, checked below.)
             "IFERROR(__xludf.DUMMYFUNCTION(\"GOOGLETRANSLATE(A1,\"\"en\"\",\"\"fr\"\")\"),\"x\")",
-            "IFERROR(__xludf.DUMMYFUNCTION(\"ARRAYFORMULA(A1:A3*2)\"),2)",
-            "IFERROR(__xludf.DUMMYFUNCTION(\"SUM(QUERY(A1:B3,\"\"select B\"\"))\"),2)",
             // A wrapper inside the text: only one level is ever unwrapped.
             "IFERROR(__xludf.DUMMYFUNCTION(\"IFERROR(__xludf.DUMMYFUNCTION(\"\"A1\"\"),0)\"),0)",
             "IFERROR(__xludf.DUMMYFUNCTION(A1),5)",
@@ -460,6 +459,8 @@ mod tests {
             assert_eq!(read(file), kept, "{file}");
             assert_eq!(unwrap_google_sheets(&from_file(file), &test_known_function), None, "{file}");
         }
+        // StarSheets: Google functions GridCraft knows come back as the formula itself.
+        assert_eq!(read("IFERROR(__xludf.DUMMYFUNCTION(\"ARRAYFORMULA(A1:A3*2)\"),2)"), "ARRAYFORMULA(A1:A3*2)");
         // Inner text over the formula length limit.
         let long = format!("IFERROR(__xludf.DUMMYFUNCTION(\"{}\"),5)", "1".repeat(gridcraft_formula::MAX_FORMULA_LEN + 1));
         assert!(read(&long).contains("DUMMYFUNCTION"));

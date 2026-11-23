@@ -126,7 +126,10 @@ fn pictures_fit_current_geometry_and_selection_cannot_erase_them() {
     let geo = Geo::new(sheet, h.state().grid.rect.unwrap(), h.state().view().scroll);
     let cell = geo.cell_rect(sheet, CellRef::new(0, 0));
     assert!(cell.contains_rect(meshes[0].0));
-    assert_eq!(cell.center(), meshes[0].0.center());
+    // StarSheets: a picture follows the cell's alignment, as in Google Sheets; the default
+    // (General across, bottom down) centres it across and puts it on the cell's bottom edge.
+    assert_eq!(cell.center().x, meshes[0].0.center().x);
+    assert_eq!(cell.bottom(), meshes[0].0.bottom());
     h.get_by_label("Picture: Three stripes");
     h.state_mut().begin_edit(None, false);
     assert!(h.state().editor.is_none());

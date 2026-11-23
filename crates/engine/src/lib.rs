@@ -611,6 +611,26 @@ impl Session {
     pub fn doc_mut(&mut self) -> Result<&mut DocState> {
         self.active_mut().ok_or(EngineError::NoDocument)
     }
+    /// Gives the open workbook Excel's defaults: 64 × 20 px cells, Calibri 11 as the Normal font
+    /// and Excel's theme. StarSheets' new workbooks follow Google Sheets (Roboto 10, 100 × 21 px);
+    /// tests written for Excel's defaults (pagination, object layout, the ribbon's font list)
+    /// call this first. Only for a fresh workbook: cells already styled keep their style ids.
+    #[doc(hidden)]
+    pub fn use_excel_defaults(&mut self) {
+        let Ok(d) = self.doc_mut() else { return };
+        let wb = Arc::make_mut(&mut d.wb);
+        for i in 0..wb.sheets.len() {
+            if let Some(sh) = wb.sheet_mut(i) {
+                sh.default_col_width = gridcraft_model::DEFAULT_COL_WIDTH;
+                sh.default_row_height = gridcraft_model::DEFAULT_ROW_HEIGHT;
+            }
+        }
+        let mut normal = wb.styles.get(gridcraft_model::StyleId::DEFAULT).clone();
+        normal.font.name = "Calibri".into();
+        normal.font.size = gridcraft_model::EXCEL_FONT_SIZE;
+        wb.styles = gridcraft_model::StyleTable::with_default(normal);
+        wb.theme = gridcraft_model::Theme::file_default();
+    }
     /// The warning an edit of `at` on `sheet` gets from sheet protection, or `None` when the edit
     /// is allowed. Front ends ask before opening an editor, so typing into a locked cell never
     /// leaves a draft that can't be entered (and so blocks saving).

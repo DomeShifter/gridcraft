@@ -192,7 +192,8 @@ fn frozen_merged_range_keeps_its_outline_when_scrolled() {
         .collect();
     assert_eq!(right_ends.len(), 4, "top and bottom edges, one segment per column: {right_ends:?}");
     assert_eq!(
-        right_ends.iter().filter(|x| (**x - freeze_x).abs() < 1.0).count(),
+        // StarSheets draws thick borders with square caps (half the 3 px width past the corner).
+        right_ends.iter().filter(|x| (**x - freeze_x).abs() < 2.0).count(),
         2,
         "B's segments end at the freeze line: {right_ends:?} vs {freeze_x}"
     );

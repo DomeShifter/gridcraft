@@ -24,6 +24,8 @@ fn harness_on(session: Session, os: OperatingSystem) -> Harness {
 fn blank() -> Session {
     let mut s = Session::new();
     s.new_workbook();
+    // The ribbon's font list is checked from Excel's Calibri 11.
+    s.use_excel_defaults();
     s
 }
 

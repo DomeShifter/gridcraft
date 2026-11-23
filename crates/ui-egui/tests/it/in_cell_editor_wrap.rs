@@ -39,8 +39,10 @@ fn a_wrap_text_cell_edits_wrapped_at_the_column_width() {
     let wrapped = editor_rect(true);
     let one_line = editor_rect(false);
     assert!(one_line.width() > 400.0, "without Wrap Text the editor widens to the text: {one_line:?}");
-    assert!(wrapped.width() < 120.0, "with Wrap Text the editor keeps the column's width: {wrapped:?}");
-    assert!(wrapped.height() > 4.0 * one_line.height(), "and grows down to show every line: {wrapped:?} vs {one_line:?}");
+    // StarSheets (to-do 2 row 16): a Wrap Text cell's editor widens like any other, then wraps at
+    // the grid's edge and grows down, so a long edit is never squeezed into a narrow column.
+    assert!(wrapped.width() >= 120.0, "with Wrap Text the editor widens too: {wrapped:?}");
+    assert!(wrapped.height() >= one_line.height(), "and is at least one line tall: {wrapped:?} vs {one_line:?}");
 }
 
 /// A short Wrap Text edit stays one line tall: the field doesn't reserve rows over the cells below.
@@ -62,6 +64,7 @@ fn a_short_wrap_text_edit_stays_one_line_tall() {
 /// 2 px inset a side, with no text margin (the field has no frame). Measured narrower, the editor
 /// would count rows the field doesn't have and reach over the cells below.
 #[test]
+#[ignore = "StarSheets sizes the in-cell editor itself (commits 0062, 0070: it widens, then wraps at the grid's edge); this measures GridCraft's own sizing"]
 fn the_editor_measures_the_text_at_the_fields_wrap_width() {
     let ctx = Context::default();
     let mut session = Session::new();

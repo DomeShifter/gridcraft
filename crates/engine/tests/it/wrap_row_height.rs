@@ -25,8 +25,10 @@ fn wrapped_row_fits_word_wrapped_lines() {
     s.execute("home.wrapText", json!({"range": "A1", "on": true})).unwrap();
     let wrapped = row_height(&mut s, 0);
     // Word wrap: 4 lines (one word each). The old estimate: ceil(28/10) = 3 lines.
-    // Line height at 11pt is ~19.8, so 4 lines need ~79 vs ~59 for 3.
-    assert!(wrapped >= plain + 3.0 * 19.0, "4 word-wrapped lines must grow the row by ~4 line heights: plain={plain}, wrapped={wrapped}");
+    // A line is ~1.8 × the font size (19.8 px at Excel's 11 pt, 18 at StarSheets' 10 pt), so 4
+    // lines need ~4 lines' height vs ~3 for the old estimate.
+    let line = gridcraft_engine::model::DEFAULT_FONT_SIZE * 1.8;
+    assert!(wrapped >= 4.0 * line - 2.0 && wrapped > plain + 2.0 * line, "4 word-wrapped lines must grow the row to ~4 line heights: plain={plain}, wrapped={wrapped}");
 }
 
 #[test]
@@ -38,7 +40,8 @@ fn issue_repro_nasa_sentence() {
     s.execute("home.wrapText", json!({"range": "A1", "on": true})).unwrap();
     let h = row_height(&mut s, 0);
     // Excel shows this at ~10 lines in a 12-char column; the character estimate undercounts.
-    assert!(h >= 9.0 * 19.0, "NASA sentence in a 12-char column needs ~10 lines, got height {h}");
+    let line = gridcraft_engine::model::DEFAULT_FONT_SIZE * 1.8;
+    assert!(h >= 9.0 * line, "NASA sentence in a 12-char column needs ~10 lines, got height {h}");
 }
 
 #[test]

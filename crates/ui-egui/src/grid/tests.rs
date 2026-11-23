@@ -211,7 +211,9 @@ fn german_context_menus_have_no_two_items_alike() {
             let mut seen: Vec<(String, &str)> = Vec::new();
             for key in keys.iter().chain([extra]) {
                 let shown = Language::De.tr(key).trim_end_matches('…').trim().to_lowercase();
-                if let Some((_, other)) = seen.iter().find(|(text, _)| *text == shown) {
+                // The same item twice is not two items alike: StarSheets' Sheets menu repeats
+                // Excel's labels in the same function (`menu_labels` reads both lists).
+                if let Some((_, other)) = seen.iter().find(|(text, k)| *text == shown && k != key) {
                     panic!("German {menu} menu shows {key:?} and {other:?} both as {shown:?}");
                 }
                 seen.push((shown, key));

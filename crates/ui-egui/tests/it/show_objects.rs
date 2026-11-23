@@ -17,6 +17,7 @@ const CTRL: Modifiers = Modifiers { alt: false, ctrl: true, shift: false, mac_cm
 fn fixture() -> (Harness, u32) {
     let mut session = Session::new();
     session.new_workbook();
+    session.use_excel_defaults(); // laid out for Excel's default cells and font
     let shape = session.execute("insert.shape", json!({"kind": "rectangle", "at": "D3", "fill": "123456"})).unwrap();
     let id = shape["shape"].as_u64().unwrap() as u32;
     session.execute("selection.set", json!({"range": "A1"})).unwrap();

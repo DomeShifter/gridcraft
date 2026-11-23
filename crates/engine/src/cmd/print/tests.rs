@@ -5,6 +5,8 @@ use super::*;
 fn s() -> Session {
     let mut s = Session::new();
     s.new_workbook();
+    // The page maths below is worked out for Excel's 64 × 20 px cells.
+    s.use_excel_defaults();
     s
 }
 fn pdf_of(s: &mut Session, p: Json) -> (Vec<u8>, u64) {

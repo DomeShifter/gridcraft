@@ -16,6 +16,7 @@ fn harness() -> Harness {
 fn harness_at(ppp: f32) -> Harness {
     let mut session = Session::new();
     session.new_workbook();
+    session.use_excel_defaults(); // laid out for Excel's default cells and font
     let mut h = crate::common::builder().with_size(egui::vec2(1200.0, 800.0)).with_pixels_per_point(ppp).build_ui_state(
         |ui, app: &mut SheetApp| {
             app.logic(ui.ctx());

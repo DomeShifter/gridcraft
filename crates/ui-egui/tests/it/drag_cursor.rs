@@ -57,6 +57,14 @@ fn press(h: &mut Harness, pos: Pos2) {
 }
 
 fn assert_cursor(h: &Harness, expected: CursorIcon) {
+    // StarSheets' Sheets cursors (commit 0013): the plain arrow over cells; over the selection's
+    // edge an open hand, closed while cells or columns are being moved. Objects keep Move.
+    let expected = match (expected, &h.state().grid.drag) {
+        (CursorIcon::Cell, _) => CursorIcon::Default,
+        (CursorIcon::Move, Drag::None) => CursorIcon::Grab,
+        (CursorIcon::Move, Drag::Move { .. } | Drag::MoveCols { .. }) => CursorIcon::Grabbing,
+        (other, _) => other,
+    };
     assert_eq!(h.output().platform_output.cursor_icon, expected, "drag state: {:?}", h.state().grid.drag);
 }
 
