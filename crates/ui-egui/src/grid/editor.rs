@@ -36,6 +36,18 @@ pub(super) fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, s
     // Wrap Text: the editor keeps the column's width and wraps, growing down as Excel's does.
     // Otherwise it widens to the text's one-line width.
     let wrap = st.align.wrap;
+    // StarSheets (to-do 2 row 17): a one-line edit too long for the room right of the cell wraps
+    // at the grid's right edge and grows down instead, as far as the grid goes, as in Sheets.
+    let room_right = geo.cells.right() - rect.left();
+    let room_down = (geo.cells.bottom() - rect.top()).max(rect.height());
+    if !wrap && room_right > rect.width() {
+        let text_w = ui.painter().layout_no_wrap(ed.text.clone(), font.clone(), Color32::BLACK).size().x;
+        if editor_width(text_w, rect.width(), size) > room_right {
+            let wrapped = ui.painter().layout(ed.text.clone(), font.clone(), Color32::BLACK, (room_right - 4.0).max(1.0));
+            let h = (wrapped.size().y.max(size * 1.3 * shown) + size + 4.0).max(rect.height()).min(room_down);
+            return draw_in_cell_editor(app, ui, geo, sh, wb, cell, rect, &st, font, true, room_right, h);
+        }
+    }
     let (w, h) = if wrap {
         // The field wraps at the width it is given (the editor's less its 2 px inset a side): its
         // frame is `Frame::NONE`, so no text margin is taken off.
@@ -47,6 +59,12 @@ pub(super) fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, s
         let h = if lines > 1.0 { (size * 1.3 * lines + 4.0).max(rect.height()) } else { rect.height() };
         (editor_width(text_w, rect.width(), size).min(geo.cells.right() - rect.left()), h)
     };
+    draw_in_cell_editor(app, ui, geo, sh, wb, cell, rect, &st, font, wrap, w, h);
+}
+
+/// Paints the in-cell editor `w` x `h` from the cell's top left and runs the text field in it.
+#[allow(clippy::too_many_arguments)]
+fn draw_in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, wb: &Workbook, cell: CellRef, rect: Rect, st: &gridcraft_engine::model::Style, font: FontId, wrap: bool, w: f32, h: f32) {
     // Grows to the left on a right-to-left sheet.
     let erect = geo.mirror_rect(Rect::from_min_size(rect.min, vec2(w, h)));
     let fill = match st.fill.pattern {
