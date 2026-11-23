@@ -69,6 +69,21 @@ pub enum EngineError {
 
 pub type Result<T> = std::result::Result<T, EngineError>;
 
+/// A top-level command that changed a workbook, for a host that shares edits with other copies of
+/// the same workbook (live editing): what ran, where it ran (the sheet and selection before it),
+/// and the workbook before and after it. Collected in [`Session::sync_log`] while that is `Some`.
+#[derive(Clone, Debug)]
+pub struct SyncStep {
+    pub doc: u64,
+    pub sheet: usize,
+    pub selection: Selection,
+    pub id: String,
+    pub params: Json,
+    pub undoable: bool,
+    pub before: Arc<Workbook>,
+    pub after: Arc<Workbook>,
+}
+
 #[derive(Clone, Debug)]
 pub struct HistoryEntry {
     pub label: String,
@@ -511,6 +526,9 @@ pub struct Session {
     pub recorder: Option<record::Recorder>,
     /// How many `execute` calls are running (0 between top-level commands).
     depth: u32,
+    /// While `Some`, every top-level command that changes a workbook adds a [`SyncStep`]; the
+    /// host takes them (live editing). Commands nested in another are part of its step.
+    pub sync_log: Option<Vec<SyncStep>>,
     /// The steps the last successful `automate.runScript` or `macro.run` ran while a recorder was
     /// on, for the recorder to keep with that step (see [`record::Recorder::ran`]); taken by the
     /// recording hook.
@@ -736,6 +754,9 @@ impl Session {
             None => (0, 0, String::new(), Selection::default()),
         });
         let doc_uid = before.as_ref().map(|(uid, ..)| *uid);
+        let sync_before = (self.depth == 0 && self.sync_log.is_some())
+            .then(|| before.as_ref().map(|(uid, wb, sel)| (*uid, wb.active_sheet(), sel.clone(), wb.clone(), params.clone())))
+            .flatten();
         let requests_before = self.ui_requests.len();
         let marked = doc_uid.zip(start).map(|(uid, (_, len))| (uid, len));
         self.marks.extend(marked);
@@ -900,6 +921,14 @@ impl Session {
             self.group_step = None;
         } else if let Some(uid) = doc_uid {
             self.bound_tail(uid);
+        }
+        if result.is_ok()
+            && let Some((doc, sheet, selection, wb, params)) = sync_before
+            && let Some(after) = self.docs.iter().find(|d| d.uid == doc).map(|d| d.wb.clone())
+            && !Arc::ptr_eq(&after, &wb)
+            && let Some(log) = self.sync_log.as_mut()
+        {
+            log.push(SyncStep { doc, sheet, selection, id: id.to_string(), params, undoable: spec.undoable, before: wb, after });
         }
         result
     }
