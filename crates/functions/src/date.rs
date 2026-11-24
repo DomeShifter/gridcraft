@@ -246,6 +246,12 @@ fn parsed_text(a: &[Arg], c: &mut dyn Ctx) -> R<(f64, &'static str)> {
 }
 
 fn datevalue(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    // Google Sheets also takes a date itself (a cell holding a date, or a date serial number) and
+    // gives its day; Excel answers #VALUE!. Sheets' QUERY recipes rely on it
+    // (`TEXT(DATEVALUE(I2), "yyyy-mm-dd")` with a date in I2).
+    if let Value::Number(n) = scalar(arg(a, 0)?) {
+        return num_val(n.floor());
+    }
     let (n, f) = parsed_text(a, c)?;
     if !f.contains(['d', 'y']) {
         return Err(CellError::Value);
@@ -753,7 +759,9 @@ mod tests {
         close(ev("DATEVALUE", vec![t("4-Mar-2026")]), d(2026.0, 3.0, 4.0));
         is_err(ev("DATEVALUE", vec![t("hello")]), CellError::Value);
         is_err(ev("DATEVALUE", vec![t("123")]), CellError::Value);
-        is_err(ev("DATEVALUE", vec![n(43831.0)]), CellError::Value);
+        // A date itself (Google Sheets; Excel says #VALUE!): its day, the time of day dropped.
+        close(ev("DATEVALUE", vec![n(43831.0)]), 43831.0);
+        close(ev("DATEVALUE", vec![n(44821.75)]), 44821.0);
         close(ev("TIMEVALUE", vec![t("6:00 PM")]), 0.75);
         close(ev("TIMEVALUE", vec![t("1/2/2020 12:00")]), 0.5);
         is_err(ev("TIMEVALUE", vec![t("x")]), CellError::Value);
