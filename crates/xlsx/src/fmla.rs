@@ -154,10 +154,73 @@ fn strip_param_prefix(n: String) -> String {
 /// Formula text read from a file → model text (strips prefixes when it parses).
 pub fn from_file(text: &str) -> String {
     let body = text.strip_prefix('=').unwrap_or(text);
-    match gridcraft_formula::parse(body) {
+    let marked = mark_excel_regex(body);
+    match gridcraft_formula::parse(marked.as_deref().unwrap_or(body)) {
+        Ok(e) if marked.is_some() => gridcraft_formula::print(&excel_regex_defaults(strip_param_prefixes(e))),
         Ok(e) => gridcraft_formula::print(&strip_param_prefixes(e)),
         Err(_) => body.to_string(),
     }
+}
+
+/// Excel 365's REGEXEXTRACT and REGEXREPLACE share their names with Google Sheets' but not their
+/// rules; GridCraft (StarSheets 0091) tells them apart by the number of written arguments: two
+/// and three are Google's (`sheets-functions`), more are Excel's. A file from Excel spells them
+/// `_xlfn.REGEXEXTRACT`; the reader marks those (`mark_excel_regex`) and writes Excel's default
+/// out (`excel_regex_defaults`: return mode 0, occurrence 0), so `REGEXEXTRACT(A1,"(\d+)x")` from
+/// Excel reads as `REGEXEXTRACT(A1,"(\d+)x",0)` and keeps Excel's result (the whole match).
+/// Google's own export writes no prefix, so its formulas keep Google's rules.
+const EXCEL_REGEX: [(&str, &str, usize); 2] = [("_xlfn.REGEXEXTRACT(", "REGEXEXTRACT__XLFN(", 2), ("_xlfn.REGEXREPLACE(", "REGEXREPLACE__XLFN(", 3)];
+
+/// `text` with every `_xlfn.REGEXEXTRACT(` / `_xlfn.REGEXREPLACE(` outside quotes renamed to a
+/// marker the parser keeps; `None` when there is none.
+fn mark_excel_regex(text: &str) -> Option<String> {
+    const NEEDLE: &[u8] = b"_xlfn.regex";
+    if !text.as_bytes().windows(NEEDLE.len()).any(|w| w.eq_ignore_ascii_case(NEEDLE)) {
+        return None;
+    }
+    let (mut out, mut quote, mut found, mut i) = (String::with_capacity(text.len() + 8), None::<u8>, false, 0);
+    let b = text.as_bytes();
+    while i < b.len() {
+        let c = b[i];
+        match quote {
+            // A doubled quote inside quotes is the quote itself; the next one ends the run.
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None if c == b'"' || c == b'\'' => quote = Some(c),
+            None => {
+                let after_name = i > 0 && (b[i - 1].is_ascii_alphanumeric() || matches!(b[i - 1], b'_' | b'.'));
+                if let Some((from, to, _)) = EXCEL_REGEX.iter().find(|(from, ..)| !after_name && b.get(i..i + from.len()).is_some_and(|w| w.eq_ignore_ascii_case(from.as_bytes())))
+                {
+                    out.push_str(to);
+                    i += from.len();
+                    found = true;
+                    continue;
+                }
+            }
+        }
+        // Copy the whole character (`i` only ever stops on ASCII or a character's first byte).
+        let len = text[i..].chars().next().map_or(1, char::len_utf8);
+        out.push_str(&text[i..i + len]);
+        i += len;
+    }
+    found.then_some(out)
+}
+
+/// The marked calls (`mark_excel_regex`) back under their names, with Excel's default written out
+/// when only Google's number of arguments was given.
+fn excel_regex_defaults(e: Expr) -> Expr {
+    e.map(&mut |x| match x {
+        Expr::Call(n, mut args) => match EXCEL_REGEX.iter().find(|(_, to, _)| to.strip_suffix('(').is_some_and(|m| m.eq_ignore_ascii_case(&n))) {
+            Some((_, to, google_args)) => {
+                if args.len() == *google_args {
+                    args.push(Expr::Number(0.0));
+                }
+                Expr::Call(to.trim_end_matches("__XLFN(").to_string(), args)
+            }
+            None => Expr::Call(n, args),
+        },
+        other => other,
+    })
 }
 
 fn strip_param_prefixes(e: Expr) -> Expr {
@@ -401,6 +464,21 @@ mod tests {
         assert_eq!(text_to_file("=IFS(A1>0,1)"), "_xlfn.IFS(A1>0,1)");
         assert_eq!(to_file(&Formula::new("REGEXTEST(A1,\"x\")&ENCODEURL(B1)")), "_xlfn.REGEXTEST(A1,\"x\")&_xlfn.ENCODEURL(B1)");
         assert_eq!(to_file(&Formula::new("GROUPBY(A1:A3,B1:B3,\"SUM\")")), "_xlfn.GROUPBY(A1:A3,B1:B3,\"SUM\")");
+    }
+
+    /// StarSheets 0091: Excel's `_xlfn.REGEXEXTRACT` / `_xlfn.REGEXREPLACE` read with Excel's
+    /// default written out, so they keep Excel's rules; Google's (no prefix) stay as they are.
+    #[test]
+    fn excel_regex_functions_keep_excels_rules() {
+        assert_eq!(from_file("_xlfn.REGEXEXTRACT(A1,\"(\\d+)x\")"), "REGEXEXTRACT(A1,\"(\\d+)x\",0)");
+        assert_eq!(from_file("=_xlfn.REGEXREPLACE(A1,\"a\",\"b\")&_XLFN.regexextract(B1,\"c\",1)"), "REGEXREPLACE(A1,\"a\",\"b\",0)&REGEXEXTRACT(B1,\"c\",1)");
+        assert_eq!(from_file("_xlfn.REGEXREPLACE(A1,\"a\",\"b\",2,1)"), "REGEXREPLACE(A1,\"a\",\"b\",2,1)");
+        assert_eq!(from_file("IF(A1,_xlfn.REGEXEXTRACT(A1,\"x\"),\"\")"), "IF(A1,REGEXEXTRACT(A1,\"x\",0),\"\")");
+        // Google's spelling, and the name inside text, are left alone.
+        assert_eq!(from_file("REGEXEXTRACT(A1,\"(\\d+)\")"), "REGEXEXTRACT(A1,\"(\\d+)\")");
+        assert_eq!(from_file("\"_xlfn.REGEXEXTRACT(\"&A1"), "\"_xlfn.REGEXEXTRACT(\"&A1");
+        // Google's export wrapper around a Google REGEXEXTRACT comes back with two arguments.
+        assert_eq!(read("IFERROR(__xludf.DUMMYFUNCTION(\"REGEXEXTRACT(A1,\"\"(\\d+)\"\")\"),\"1\")"), "REGEXEXTRACT(A1,\"(\\d+)\")");
     }
 
     /// A formula as the reader leaves it, then with Google Sheets' wrappers unwrapped against

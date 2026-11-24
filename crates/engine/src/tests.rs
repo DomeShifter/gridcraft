@@ -6728,6 +6728,79 @@ fn google_function_batch_1_calculates_and_saves_in_the_wrapper() {
 }
 
 #[test]
+fn google_function_batch_2_calculates_and_round_trips() {
+    // StarSheets 0091: Google's REGEXEXTRACT (two arguments) gives the capture groups and is saved
+    // in Google's export wrapper; Excel's (a return mode given) gives the whole match and is
+    // saved for Excel. ISDATE knows a date cell by its format. The rest calculate and come back.
+    use std::io::Read;
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["ab12-34", 3]]})).unwrap();
+    s.execute("range.setValues", json!({"range": "H1", "values": [[8], [4], [3], [6]]})).unwrap();
+    s.execute("cell.set", json!({"cell": "A2", "input": "2026-11-24"})).unwrap();
+    let cells = [
+        ("D1", "=REGEXEXTRACT(A1,\"(\\d+)-(\\d+)\")"),
+        ("D2", "=REGEXEXTRACT(A1,\"\\d+-\\d+\",0)"),
+        ("D3", "=REGEXREPLACE(A1,\"(\\d+)-(\\d+)\",\"$2-$1\")"),
+        ("D4", "=ISDATE(A2)"),
+        ("D5", "=ISDATE(B1)"),
+        ("D6", "=ISBETWEEN(B1,1,3,TRUE,FALSE)"),
+        ("D7", "=AVERAGE.WEIGHTED(B1,2,5,2)"),
+        ("D8", "=EPOCHTODATE(0)"),
+        ("D9", "=TO_PURE_NUMBER(B1)"),
+        ("D10", "=ISDATE(\"July 20 1969\")"),
+        ("J1", "=ARRAY_CONSTRAIN(H1:H4,2,1)"),
+    ];
+    for (c, f) in cells {
+        s.execute("cell.set", json!({"cell": c, "input": f})).unwrap();
+    }
+    let want = [
+        ("D1", Value::text("12")),
+        ("E1", Value::text("34")),
+        ("D2", Value::text("12-34")),
+        ("D3", Value::text("ab34-12")),
+        ("D4", Value::Bool(true)),
+        ("D5", Value::Bool(false)),
+        ("D6", Value::Bool(false)),
+        ("D7", Value::Number(4.0)),
+        ("D8", Value::Number(25_569.0)),
+        ("D9", Value::Number(3.0)),
+        ("D10", Value::Bool(true)),
+        ("J1", Value::Number(8.0)),
+        ("J2", Value::Number(4.0)),
+        ("J3", Value::Empty),
+    ];
+    for (c, w) in &want {
+        assert_eq!(&v(&s, c), w, "{c}");
+    }
+    let wb = s.doc().unwrap().wb.clone();
+    let bytes = crate::io::save_bytes(&wb, "x.xlsx").unwrap();
+    let mut xml = String::new();
+    zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap().by_name("xl/worksheets/sheet1.xml").unwrap().read_to_string(&mut xml).unwrap();
+    assert!(xml.contains(r#"DUMMYFUNCTION("REGEXEXTRACT(A1,""(\d+)-(\d+)"")"),"12")"#), "{xml}");
+    assert!(xml.contains(r#">_xlfn.REGEXEXTRACT(A1,"\d+-\d+",0)</f>"#), "{xml}");
+    s.execute("file.open", json!({"name": "x", "base64": crate::io::base64_encode(&bytes)})).unwrap();
+    for (c, f) in cells {
+        let got = s.execute("cell.get", json!({"cell": c})).unwrap()["formula"].clone();
+        assert_eq!(got.as_str().unwrap(), f, "{c}");
+    }
+    for (c, w) in &want {
+        assert_eq!(&v(&s, c), w, "{c}");
+    }
+}
+
+#[test]
+fn excel_regex_functions_from_a_file_keep_excels_rules() {
+    // StarSheets 0091: Excel writes `_xlfn.REGEXEXTRACT(A1,"(\d+)x")` (no return mode); read as
+    // `REGEXEXTRACT(A1,"(\d+)x",0)`, it gives Excel's whole match, not Google's group.
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["12x"]]})).unwrap();
+    s.execute("cell.set", json!({"cell": "B1", "input": "=REGEXEXTRACT(A1,\"(\\d+)x\",0)"})).unwrap();
+    s.execute("cell.set", json!({"cell": "B2", "input": "=REGEXEXTRACT(A1,\"(\\d+)x\")"})).unwrap();
+    assert_eq!(v(&s, "B1"), Value::text("12x"));
+    assert_eq!(v(&s, "B2"), Value::text("12"));
+}
+
+#[test]
 fn host_data_is_an_undoable_edit_and_saved_in_the_file() {
     let mut s = s();
     s.execute("workbook.setHostData", json!({"data": "{\"v\":1}"})).unwrap();

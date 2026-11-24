@@ -253,7 +253,7 @@ mod units;
 use bessel::{besseli, besselj, besselk, bessely};
 #[cfg(test)]
 use complex::parse_complex;
-use complex::{Cx, ONE, complex, im_unary, imabs, imaginary, imargument, imdiv, impower, improduct, imreal, imsub, imsum};
+use complex::{Cx, ONE, complex, im_unary, imabs, imaginary, imargument, imdiv, imlog, impower, improduct, imreal, imsub, imsum};
 use units::convert;
 
 im1!(imconjugate, |z: Cx| Ok(Cx::new(z.re, -z.im)));
@@ -292,6 +292,9 @@ im1!(imsinh, |z: Cx| Ok(z.sinh()));
 im1!(imcosh, |z: Cx| Ok(z.cosh()));
 im1!(imsech, |z: Cx| ONE.div(z.cosh()));
 im1!(imcsch, |z: Cx| ONE.div(z.sinh()));
+// Google Sheets' IMTANH and IMCOTH (StarSheets 0091).
+im1!(imtanh, |z: Cx| z.sinh().div(z.cosh()));
+im1!(imcoth, |z: Cx| z.cosh().div(z.sinh()));
 
 pub(crate) fn specs() -> Vec<FnSpec> {
     vec![
@@ -381,6 +384,9 @@ pub(crate) fn specs() -> Vec<FnSpec> {
         f!("IMSUB", 2, 2, Engineering, S, "IMSUB(inumber1, inumber2)", "Difference of two complex numbers.", imsub),
         f!("IMSUM", 1, VAR, Engineering, A, "IMSUM(inumber1, [inumber2], ...)", "Sum of complex numbers.", imsum),
         f!("IMTAN", 1, 1, Engineering, S, "IMTAN(inumber)", "Tangent of a complex number.", imtan),
+        f!("IMTANH", 1, 1, Engineering, S, "IMTANH(number)", "Hyperbolic tangent of a complex number (Google Sheets).", imtanh),
+        f!("IMCOTH", 1, 1, Engineering, S, "IMCOTH(number)", "Hyperbolic cotangent of a complex number (Google Sheets).", imcoth),
+        f!("IMLOG", 2, 2, Engineering, S, "IMLOG(value, base)", "Logarithm of a complex number to a given base (Google Sheets).", imlog),
         f!("BESSELJ", 2, 2, Engineering, S, "BESSELJ(x, n)", "Bessel function of the first kind, J_n(x).", besselj),
         f!("BESSELY", 2, 2, Engineering, S, "BESSELY(x, n)", "Bessel function of the second kind, Y_n(x).", bessely),
         f!("BESSELI", 2, 2, Engineering, S, "BESSELI(x, n)", "Modified Bessel function of the first kind, I_n(x).", besseli),
@@ -625,6 +631,19 @@ mod tests {
         let Value::Text(csh) = ev("IMCSCH", vec![t("4+3i")]) else { panic!() };
         cx(ev("IMPRODUCT", vec![t(&sh), t(&csh)]), 1.0, 0.0);
         cx(ev("IMSUM", vec![t("1.5e1+2E-1j")]), 15.0, 0.2);
+        // Google Sheets' IMLOG, IMTANH, IMCOTH (StarSheets 0091), with IMLOG's help-page examples.
+        cx(ev("IMLOG", vec![t("1+i"), n(3.5)]), 0.276_647_377_832_556, 0.626_932_774_314_643);
+        cx(ev("IMLOG", vec![t("25+34i"), n(2.3)]), 4.493_245_467_712_84, 1.124_700_860_317_58);
+        cx(ev("IMLOG", vec![n(100.0), n(10.0)]), 2.0, 0.0);
+        is_err(ev("IMLOG", vec![t("1+i"), n(0.0)]), CellError::Num);
+        is_err(ev("IMLOG", vec![t("1+i"), n(1.0)]), CellError::Num);
+        is_err(ev("IMLOG", vec![t("0"), n(10.0)]), CellError::Num);
+        cx(ev("IMTANH", vec![t("1+i")]), 1.083_923_327_338_694_5, 0.271_752_585_319_511_7);
+        let Value::Text(th) = ev("IMTANH", vec![t("4+3i")]) else { panic!() };
+        let Value::Text(cth) = ev("IMCOTH", vec![t("4+3i")]) else { panic!() };
+        cx(ev("IMPRODUCT", vec![t(&th), t(&cth)]), 1.0, 0.0);
+        is_err(ev("IMCOTH", vec![t("0")]), CellError::Num);
+        is_text(ev("IMTANH", vec![t("0")]), "0");
     }
 
     #[test]

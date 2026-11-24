@@ -277,6 +277,47 @@ impl<'h> Evaluator<'h> {
         self.builtin("XLOOKUP", args)
     }
 
+    /// Google Sheets' ISDATE (StarSheets 0091): a number in a cell is a date when the cell's number
+    /// format shows a date, which only the evaluator knows; text that reads as a date is one too
+    /// (`gridcraft_functions::sheets_is_date`). A range gives one answer per cell, as other
+    /// functions lift over ranges.
+    pub(super) fn isdate(&mut self, args: &[Expr]) -> Ev {
+        let [x] = args else { return err(CellError::Value) };
+        let sys = self.host.workbook().date_system;
+        match self.eval(x) {
+            Ev::R(areas) => {
+                let [a] = areas.as_slice() else { return err(CellError::Value) };
+                let range = self.trim_lines(a);
+                let (rows, cols) = (range.height() as usize, range.width() as usize);
+                if rows.saturating_mul(cols) > MAX_CELLS {
+                    return err(CellError::Num);
+                }
+                let mut out = Vec::with_capacity(rows * cols);
+                for r in range.start.row..=range.end.row {
+                    for c in range.start.col..=range.end.col {
+                        let at = CellRef::new(r, c);
+                        let v = self.host.cell_value(a.sheet, at);
+                        let dated = matches!(v, Value::Number(_)) && {
+                            let wb = self.host.workbook();
+                            wb.sheet(a.sheet).is_some_and(|s| gridcraft_functions::is_date_format(wb.styles.get(s.style_id(at)).num_fmt.as_str()))
+                        };
+                        out.push(gridcraft_functions::sheets_is_date(&v, dated, sys));
+                    }
+                }
+                match out.len() {
+                    1 => Ev::V(out.swap_remove(0)),
+                    _ => Ev::V(Array::new(rows, cols, out).map(Value::from).unwrap_or(Value::Error(CellError::Calc))),
+                }
+            }
+            Ev::V(Value::Array(arr)) => {
+                let data = arr.data.iter().map(|v| gridcraft_functions::sheets_is_date(v, false, sys)).collect();
+                Ev::V(Array::new(arr.rows, arr.cols, data).map(Value::from).unwrap_or(Value::Error(CellError::Calc)))
+            }
+            Ev::V(v) => Ev::V(gridcraft_functions::sheets_is_date(&v, false, sys)),
+            Ev::L(_) => err(CellError::Value),
+        }
+    }
+
     pub(super) fn cell_info(&mut self, args: &[Expr]) -> Ev {
         let kind = match self.arg_val(args, 0).map(|v| v.scalar().to_text()) {
             Some(Ok(t)) => t.to_ascii_lowercase(),

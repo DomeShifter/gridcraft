@@ -1,13 +1,16 @@
-//! Google Sheets functions that Excel doesn't have, batch 1 (StarSheets 0090): SPLIT, JOIN,
-//! REGEXMATCH, COUNTUNIQUE, FLATTEN, ISEMAIL, ISURL, TO_TEXT and the operator functions. The
-//! work is done in the StarSheets crate `sheets-functions` (`google.rs`, tested there); this
-//! registers them. Formulas using them are saved to .xlsx in Google's export wrapper
-//! (`__xludf.DUMMYFUNCTION`, xlsx `sheet_write.rs` GOOGLE_ONLY), as QUERY is.
+//! Google Sheets functions that Excel doesn't have. Batch 1 (StarSheets 0090): SPLIT, JOIN,
+//! REGEXMATCH, COUNTUNIQUE, FLATTEN, ISEMAIL, ISURL, TO_TEXT and the operator functions. Batch 2
+//! (StarSheets 0091): ARRAY_CONSTRAIN, ISBETWEEN, ISDATE, EPOCHTODATE, AVERAGE.WEIGHTED,
+//! MARGINOFERROR and the parser functions TO_DATE, TO_DOLLARS, TO_PERCENT, TO_PURE_NUMBER (Google's
+//! REGEXEXTRACT and REGEXREPLACE are in `text.rs`, beside Excel's). The work is done in the
+//! StarSheets crate `sheets-functions` (`google.rs`, tested there); this registers them. Formulas
+//! using them are saved to .xlsx in Google's export wrapper (`__xludf.DUMMYFUNCTION`, xlsx
+//! `sheet_write.rs` GOOGLE_ONLY), as QUERY is.
 
-use gridcraft_core::Value;
+use gridcraft_core::{CellError, Value};
 use sheets_functions::google::{self, Op};
 
-use crate::util::{A, R, S, arg, opt_bool, scalar};
+use crate::util::{A, R, S, arg, num, numbers, opt_bool, opt_num, scalar};
 use crate::{Arg, Ctx, FnSpec, VAR};
 
 fn values(args: &[Arg]) -> Vec<Value> {
@@ -62,8 +65,68 @@ fn unary_percent(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     google::unary_percent(&scalar(arg(a, 0)?), c.date_system())
 }
 
+fn array_constrain(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    google::array_constrain(&arg(a, 0)?.value, num(a, 1)?, num(a, 2)?)
+}
+
+fn isbetween(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    google::is_between(&scalar(arg(a, 0)?), &scalar(arg(a, 1)?), &scalar(arg(a, 2)?), opt_bool(a, 3, true)?, opt_bool(a, 4, true)?)
+}
+
+/// ISDATE of a value alone. The evaluator answers ISDATE of a cell itself (calc `isdate`), where
+/// the cell's number format says whether a number is a date.
+fn isdate(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    Ok(google::is_date(&scalar(arg(a, 0)?), false, c.date_system()))
+}
+
+fn epochtodate(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    google::epochtodate(num(a, 0)?, opt_num(a, 1, 1.0)?, c.date_system())
+}
+
+/// AVERAGE.WEIGHTED: a value typed in the formula is read as a number ("3" is 3, other text is
+/// `#VALUE!`); in ranges, cells that aren't numbers leave their pair out (`google.rs`).
+fn average_weighted(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    let mut v = Vec::with_capacity(a.len());
+    for x in a {
+        v.push(match &x.value {
+            Value::Array(_) | Value::Number(_) | Value::Empty | Value::Error(_) => x.value.clone(),
+            _ if x.from_ref => x.value.clone(),
+            other => Value::number(other.to_number()?),
+        });
+    }
+    google::average_weighted(&v)
+}
+
+/// MARGINOFERROR(range, confidence): CONFIDENCE.T(1 - confidence, STDEV(range), COUNT(range)), as
+/// Google's help page defines it. The confidence is between 0 and 1 (`#NUM!` otherwise); fewer
+/// than two numbers is `#DIV/0!` (STDEV's answer).
+fn marginoferror(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    let xs = numbers(a.get(..1).unwrap_or_default())?;
+    let confidence = num(a, 1)?;
+    if !(confidence > 0.0 && confidence < 1.0) {
+        return Err(CellError::Num);
+    }
+    let n = xs.len() as f64;
+    if xs.len() < 2 {
+        return Err(CellError::Div0);
+    }
+    let mean = xs.iter().sum::<f64>() / n;
+    let sd = (xs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt();
+    let spec = crate::lookup("CONFIDENCE.T").ok_or(CellError::Calc)?;
+    match crate::call(spec, &[Arg::val(Value::number(1.0 - confidence)), Arg::val(Value::number(sd)), Arg::val(Value::number(n))], c) {
+        Value::Error(e) => Err(e),
+        v => Ok(v),
+    }
+}
+
+fn parser_identity(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    google::parser_identity(&scalar(arg(a, 0)?))
+}
+
 /// SPLIT takes its text whole (a column splits row by row); its other arguments lift.
 const SPLIT_ARGS: &[bool] = &[false, true];
+/// ARRAY_CONSTRAIN and MARGINOFERROR take their range whole; the numbers after it lift.
+const RANGE_THEN_SCALARS: &[bool] = &[false, true];
 
 pub(crate) fn specs() -> Vec<FnSpec> {
     vec![
@@ -98,6 +161,70 @@ pub(crate) fn specs() -> Vec<FnSpec> {
         f!("UMINUS", 1, 1, MathTrig, S, "UMINUS(value)", "The number with its sign reversed (Google Sheets).", uminus),
         f!("UPLUS", 1, 1, MathTrig, S, "UPLUS(value)", "The value unchanged, as a leading + (Google Sheets).", uplus),
         f!("UNARY_PERCENT", 1, 1, MathTrig, S, "UNARY_PERCENT(percentage)", "The number divided by 100, as a trailing % (Google Sheets).", unary_percent),
+        f!(
+            "ARRAY_CONSTRAIN",
+            3,
+            3,
+            Lookup,
+            RANGE_THEN_SCALARS,
+            "ARRAY_CONSTRAIN(input_range, num_rows, num_cols)",
+            "The top-left rows and columns of an array result (Google Sheets).",
+            array_constrain
+        ),
+        f!(
+            "ISBETWEEN",
+            3,
+            5,
+            Logical,
+            S,
+            "ISBETWEEN(value_to_compare, lower_value, upper_value, [lower_value_is_inclusive], [upper_value_is_inclusive])",
+            "TRUE when a value lies between two others, ends included unless set FALSE (Google Sheets).",
+            isbetween
+        ),
+        f!("ISDATE", 1, 1, Information, S, "ISDATE(value)", "TRUE when the value is a date, or text that reads as a date (Google Sheets).", isdate),
+        f!(
+            "EPOCHTODATE",
+            1,
+            2,
+            DateTime,
+            S,
+            "EPOCHTODATE(timestamp, [unit])",
+            "A Unix timestamp in seconds (1), milliseconds (2) or microseconds (3) as a date-time in UTC (Google Sheets).",
+            epochtodate
+        ),
+        f!(
+            "AVERAGE.WEIGHTED",
+            2,
+            VAR,
+            Statistical,
+            A,
+            "AVERAGE.WEIGHTED(values, weights, [additional_values, additional_weights, ...])",
+            "The average of values, each counted by its weight (Google Sheets).",
+            average_weighted
+        ),
+        f!(
+            "MARGINOFERROR",
+            2,
+            2,
+            Statistical,
+            RANGE_THEN_SCALARS,
+            "MARGINOFERROR(range, confidence)",
+            "The random sampling error of a range of values at a confidence level (Google Sheets).",
+            marginoferror
+        ),
+        f!("TO_DATE", 1, 1, Text, S, "TO_DATE(value)", "A number as a date; other values unchanged (Google Sheets).", parser_identity),
+        f!("TO_DOLLARS", 1, 1, Text, S, "TO_DOLLARS(value)", "A number as a dollar value; other values unchanged (Google Sheets).", parser_identity),
+        f!("TO_PERCENT", 1, 1, Text, S, "TO_PERCENT(value)", "A number as a percentage; other values unchanged (Google Sheets).", parser_identity),
+        f!(
+            "TO_PURE_NUMBER",
+            1,
+            1,
+            Text,
+            S,
+            "TO_PURE_NUMBER(value)",
+            "A date, percentage or currency as a plain number; other values unchanged (Google Sheets).",
+            parser_identity
+        ),
     ]
 }
 
@@ -142,5 +269,36 @@ mod tests {
         assert_eq!(ev("JOIN", vec![Arg::val(Value::text("-")), Arg::reference(col)]), Value::text("1-2"));
         assert_eq!(ev("DIVIDE", vec![Arg::val(Value::number(1.0)), Arg::val(Value::Empty)]), Value::Error(CellError::Div0));
         assert_eq!(ev("REGEXMATCH", vec![Arg::val(Value::number(1.0)), Arg::val(Value::text("1"))]), Value::Error(CellError::Value));
+    }
+
+    /// Batch 2 (StarSheets 0091): registered, and the ones worked out here rather than in
+    /// `sheets-functions`.
+    #[test]
+    fn batch_2_registered() {
+        for name in [
+            "ARRAY_CONSTRAIN", "ISBETWEEN", "ISDATE", "EPOCHTODATE", "AVERAGE.WEIGHTED", "MARGINOFERROR", "TO_DATE", "TO_DOLLARS", "TO_PERCENT", "TO_PURE_NUMBER", "IMCOTH",
+            "IMLOG", "IMTANH",
+        ] {
+            assert!(lookup(name).is_some(), "{name}");
+        }
+        let n = |x: f64| Arg::val(Value::number(x));
+        // MARGINOFERROR: Google's example, 8, 4, 3, 6 at 95%: 3.528 (5.25 ± 3.528).
+        let data = Value::from(Array::column(vec![Value::number(8.0), Value::number(4.0), Value::number(3.0), Value::number(6.0)]));
+        let Value::Number(m) = ev("MARGINOFERROR", vec![Arg::reference(data.clone()), n(0.95)]) else { panic!() };
+        assert!((m - 3.528).abs() < 0.0005, "{m}");
+        assert_eq!(ev("MARGINOFERROR", vec![Arg::reference(data.clone()), n(1.0)]), Value::Error(CellError::Num));
+        assert_eq!(ev("MARGINOFERROR", vec![Arg::reference(Value::number(1.0)), n(0.95)]), Value::Error(CellError::Div0));
+        // AVERAGE.WEIGHTED: typed values are read as numbers; text in a range leaves its pair out.
+        assert_eq!(ev("AVERAGE.WEIGHTED", vec![Arg::val(Value::text("10")), n(1.0), n(20.0), n(3.0)]), Value::number(17.5));
+        assert_eq!(ev("AVERAGE.WEIGHTED", vec![Arg::val(Value::text("x")), n(1.0)]), Value::Error(CellError::Value));
+        // ISBETWEEN lifts over a range; ARRAY_CONSTRAIN takes its range whole.
+        let Value::Array(a) = ev("ISBETWEEN", vec![Arg::reference(data.clone()), n(4.0), n(6.0)]) else { panic!() };
+        assert_eq!(a.data, vec![Value::Bool(false), Value::Bool(true), Value::Bool(false), Value::Bool(true)]);
+        let Value::Array(a) = ev("ARRAY_CONSTRAIN", vec![Arg::reference(data), n(2.0), n(5.0)]) else { panic!() };
+        assert_eq!(a.data, vec![Value::number(8.0), Value::number(4.0)]);
+        // ISDATE of a value alone: text that reads as a date; a bare number isn't one.
+        assert_eq!(ev("ISDATE", vec![Arg::val(Value::text("July 20 1969"))]), Value::Bool(true));
+        assert_eq!(ev("ISDATE", vec![n(45_000.0)]), Value::Bool(false));
+        assert_eq!(ev("EPOCHTODATE", vec![n(86_400.0)]), Value::number(25_570.0));
     }
 }

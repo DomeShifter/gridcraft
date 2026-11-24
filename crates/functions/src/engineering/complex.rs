@@ -226,6 +226,18 @@ pub(super) fn imsub(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     im_binary(a, |x, y| Ok(x.sub(y)))
 }
 
+/// Google Sheets' IMLOG(value, base) (StarSheets 0091): the logarithm to a positive real base,
+/// ln(z) / ln(base). A base that isn't positive, or is 1, is `#NUM!`.
+pub(super) fn imlog(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    let (z, s) = cx_arg(a, 0)?;
+    let base = num(a, 1)?;
+    if base.is_nan() || base <= 0.0 || base == 1.0 {
+        return Err(CellError::Num);
+    }
+    let (l, lb) = (z.ln()?, base.ln());
+    fmt_complex(Cx::new(l.re / lb, l.im / lb), s.unwrap_or('i'))
+}
+
 pub(super) fn impower(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     let (z, s) = cx_arg(a, 0)?;
     let n = num(a, 1)?;

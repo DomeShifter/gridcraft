@@ -808,7 +808,19 @@ fn regextest(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     Ok(Value::Bool(re.is_match(&s)))
 }
 
+/// REGEXEXTRACT and REGEXREPLACE exist in both Google Sheets and Excel 365, with different rules
+/// (StarSheets 0091). The written arguments decide: Google's forms have two (REGEXEXTRACT) and
+/// three (REGEXREPLACE) arguments; Excel's add optional ones after those. The .xlsx reader writes
+/// Excel's defaults out when it reads Excel's `_xlfn.` spelling (`REGEXEXTRACT(A1,"x",0)`), so
+/// Excel files keep Excel's results; what people type in StarSheets gets Google's.
+fn google_regex_form(a: &[Arg], google_args: usize) -> bool {
+    a.len() == google_args
+}
+
 fn regexextract(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    if google_regex_form(a, 2) {
+        return sheets_functions::google::regexextract(&scalar(arg(a, 0)?), &scalar(arg(a, 1)?));
+    }
     let s = text(a, 0)?;
     let mode = opt_int(a, 2, 0)?;
     let re = build_regex(&text(a, 1)?, case_arg(a, 3)?)?;
@@ -923,10 +935,13 @@ fn expand_capped(cap: &regex::Captures, pieces: &[Piece], out: &mut String, limi
 }
 
 fn regexreplace(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    let s = text(a, 0)?;
+    // Google's form (see `google_regex_form`): text only, and an expression that isn't valid is
+    // #REF!; the replacement's `$1` references and replacing every match are the same as Excel's.
+    let google = google_regex_form(a, 3);
+    let s = if google { sheets_functions::google::regex_text(&scalar(arg(a, 0)?))? } else { text(a, 0)? };
     let rep = template(&convert_replacement(&text(a, 2)?));
     let occ = opt_int(a, 3, 0)?;
-    let re = build_regex(&text(a, 1)?, case_arg(a, 4)?)?;
+    let re = if google { sheets_functions::google::regex(&scalar(arg(a, 1)?))? } else { build_regex(&text(a, 1)?, case_arg(a, 4)?)? };
     // Built match by match within a bound past which the text can only be too long (a character
     // is at most four bytes), instead of building every replacement first (#2162).
     let limit = MAX_TEXT * 4;
@@ -1536,5 +1551,28 @@ mod tests {
         is_text(ev("REGEXREPLACE", vec![t("a1b22c"), t("[0-9]+"), t("#"), n(-2.0)]), "a#b22c");
         is_text(ev("REGEXREPLACE", vec![t("John Smith"), t("(\\w+) (\\w+)"), t("$2, $1")]), "Smith, John");
         is_text(ev("REGEXREPLACE", vec![t("ab"), t("(a)"), t("$1x")]), "axb");
+    }
+
+    /// StarSheets 0091: the two-argument REGEXEXTRACT and three-argument REGEXREPLACE are Google's;
+    /// one more argument (as the .xlsx reader writes Excel's defaults out) gives Excel's.
+    #[test]
+    fn regex_google_and_excel_forms() {
+        let date = || t("2026-11-24");
+        let pat = || t("(\\d+)-(\\d+)");
+        // Google: the capture groups; Excel (return mode 0): the whole match.
+        assert_eq!(rows_of(&ev("REGEXEXTRACT", vec![date(), pat()])), vec![vec![tv("2026"), tv("11")]]);
+        is_text(ev("REGEXEXTRACT", vec![date(), pat(), n(0.0)]), "2026-11");
+        is_text(ev("REGEXEXTRACT", vec![date(), t("-(\\d+)$")]), "24");
+        is_text(ev("REGEXEXTRACT", vec![date(), t("-(\\d+)$"), n(0.0)]), "-24");
+        // Google takes text only; Excel reads a number as text.
+        is_err(ev("REGEXEXTRACT", vec![n(241.0), t("\\d")]), CellError::Value);
+        is_text(ev("REGEXEXTRACT", vec![n(241.0), t("\\d"), n(0.0)]), "2");
+        is_err(ev("REGEXREPLACE", vec![n(241.0), t("2"), t("x")]), CellError::Value);
+        is_text(ev("REGEXREPLACE", vec![n(241.0), t("2"), t("x"), n(0.0)]), "x41");
+        // An expression that isn't valid: #REF! in Google's form, #VALUE! in Excel's.
+        is_err(ev("REGEXEXTRACT", vec![t("a"), t("(")]), CellError::Ref);
+        is_err(ev("REGEXEXTRACT", vec![t("a"), t("("), n(0.0)]), CellError::Value);
+        is_err(ev("REGEXREPLACE", vec![t("a"), t("("), t("b")]), CellError::Ref);
+        is_err(ev("REGEXREPLACE", vec![t("a"), t("("), t("b"), n(0.0)]), CellError::Value);
     }
 }

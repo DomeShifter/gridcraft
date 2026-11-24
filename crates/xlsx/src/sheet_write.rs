@@ -258,7 +258,8 @@ struct CellWriteInput<'a> {
 /// Sheets' own export saves it: `IFERROR(__xludf.DUMMYFUNCTION("<formula>"),<last result>)`, so
 /// Excel shows the result and the reader gets the formula back (StarSheets).
 const GOOGLE_ONLY: &[&str] = &[
-    "ARRAY_LITERAL", "ARRAY_ROW", "ARRAYFORMULA", "QUERY", "SORTN", "SPLIT", "REGEXMATCH", "REGEXEXTRACT", "REGEXREPLACE", "FLATTEN", "JOIN",
+    "ARRAY_LITERAL", "ARRAY_ROW", "ARRAYFORMULA", "QUERY", "SORTN", "SPLIT", "REGEXMATCH", "FLATTEN", "JOIN", "AVERAGE.WEIGHTED", "MARGINOFERROR", "ISDATE",
+    "IMCOTH", "IMLOG", "IMTANH",
     "COUNTUNIQUE", "ISBETWEEN", "ISEMAIL", "ISURL", "ARRAY_CONSTRAIN", "TO_DATE", "TO_DOLLARS", "TO_PERCENT", "TO_PURE_NUMBER", "TO_TEXT",
     "EPOCHTODATE", "SPARKLINE", "GOOGLEFINANCE", "GOOGLETRANSLATE", "DETECTLANGUAGE", "IMPORTRANGE", "IMPORTDATA", "IMPORTHTML", "IMPORTXML",
     "IMPORTFEED", "CONTINUE", "ADD", "MINUS", "MULTIPLY", "DIVIDE", "EQ", "NE", "GT", "GTE", "LT", "LTE", "UMINUS", "UPLUS", "UNARY_PERCENT",
@@ -272,14 +273,21 @@ fn google_only(f: &Formula, functions: FunctionInfo) -> bool {
     let Some(e) = f.expr_arc() else { return false };
     let (mut google, mut known, mut wrapped) = (false, true, false);
     e.walk(&mut |x| {
-        if let gridcraft_formula::Expr::Call(n, _) = x {
+        if let gridcraft_formula::Expr::Call(n, args) = x {
             let up = n.to_ascii_uppercase();
-            google |= GOOGLE_ONLY.contains(&up.as_str());
+            google |= GOOGLE_ONLY.contains(&up.as_str()) || google_regex(&up, args.len());
             known &= (functions.is_builtin)(&up);
             wrapped |= up.contains("DUMMYFUNCTION");
         }
     });
     google && known && !wrapped && f.text.len() * 2 + 64 < 8192
+}
+
+/// Google's REGEXEXTRACT (two arguments) and REGEXREPLACE (three): Excel 365 has functions of
+/// those names with other rules, written with more arguments (StarSheets 0091, `fmla.rs`
+/// EXCEL_REGEX). Excel's forms are saved as they are, for Excel to calculate.
+fn google_regex(name: &str, args: usize) -> bool {
+    matches!((name, args), ("REGEXEXTRACT", 2) | ("REGEXREPLACE", 3))
 }
 
 /// A cached value as a formula literal (the wrapper's fallback).

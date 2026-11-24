@@ -81,6 +81,8 @@ pub(crate) mod util;
 
 pub use ets::Timeline;
 pub use stat::{aggregate_values, aggregate_values_k};
+/// Google's ISDATE for the evaluator, which knows each cell's number format (StarSheets 0091).
+pub use sheets_functions::google::{is_date as sheets_is_date, is_date_format};
 
 /// An evaluated argument. Ranges arrive as `Value::Array` (blank cells = `Value::Empty`) with
 /// `from_ref = true`.

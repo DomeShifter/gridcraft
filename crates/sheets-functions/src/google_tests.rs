@@ -2,7 +2,10 @@
 
 use gridcraft_core::{Array, CellError, DateSystem, Value};
 
-use crate::google::{Op, binary, countunique, flatten, is_email, is_url, join, regexmatch, split, to_text, unary_percent, uminus, uplus};
+use crate::google::{
+    Op, array_constrain, average_weighted, binary, countunique, epochtodate, flatten, is_between, is_date, is_date_format, is_email, is_url, join, parser_identity,
+    regexextract, regexmatch, split, to_text, unary_percent, uminus, uplus,
+};
 
 fn t(s: &str) -> Value {
     Value::text(s)
@@ -233,4 +236,129 @@ fn unary_operators() {
     assert_eq!(unary_percent(&n(100.0), SYS).unwrap(), n(1.0));
     assert_eq!(unary_percent(&n(93.0), SYS).unwrap(), n(0.93));
     assert_eq!(unary_percent(&t("x"), SYS), Err(CellError::Value));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Batch 2 (StarSheets 0091)
+
+#[test]
+fn regexextract_googles_examples() {
+    // "returns 241 because it returns the first matching case".
+    assert_eq!(regexextract(&t("My favorite number is 241, but my friend's is 17"), &t("\\d+")).unwrap(), t("241"));
+    // Several capture groups: one cell each, side by side.
+    let v = regexextract(&t("You can also extract multiple values from text."), &t("You can also (\\w+) multiple (\\w+) from text.")).unwrap();
+    assert_eq!(shown(v), row(&["extract", "values"]));
+}
+
+#[test]
+fn regexextract_groups_and_errors() {
+    // One group: its text, not the whole match.
+    assert_eq!(regexextract(&t("Order #1234 shipped"), &t("#(\\d+)")).unwrap(), t("1234"));
+    // A group that took no part is empty text.
+    assert_eq!(data(regexextract(&t("ab"), &t("(a)(x)?(b)")).unwrap()), vec![t("a"), t(""), t("b")]);
+    // A non-capturing group doesn't count.
+    assert_eq!(regexextract(&t("abc"), &t("(?:a)b")).unwrap(), t("ab"));
+    // No match: #N/A; text only; a pattern that isn't valid: #REF!.
+    assert_eq!(regexextract(&t("abc"), &t("\\d")), Err(CellError::NA));
+    assert_eq!(regexextract(&n(241.0), &t("\\d+")), Err(CellError::Value));
+    assert_eq!(regexextract(&Value::Bool(true), &t("T")), Err(CellError::Value));
+    assert_eq!(regexextract(&t("a"), &t("(")), Err(CellError::Ref));
+    assert_eq!(regexextract(&Value::Error(CellError::Div0), &t("a")), Err(CellError::Div0));
+}
+
+#[test]
+fn array_constrain_takes_the_top_left() {
+    let g = grid(3, 3, (1..=9).map(|i| n(i as f64)).collect());
+    assert_eq!(data(array_constrain(&g, 2.0, 2.0).unwrap()), vec![n(1.0), n(2.0), n(4.0), n(5.0)]);
+    // Bigger than the array: all of it; truncated counts; 1 × 1 is one value.
+    assert_eq!(data(array_constrain(&g, 10.0, 2.9).unwrap()).len(), 6);
+    assert_eq!(array_constrain(&g, 1.0, 1.0).unwrap(), n(1.0));
+    assert_eq!(array_constrain(&n(5.0), 3.0, 3.0).unwrap(), n(5.0));
+    assert_eq!(array_constrain(&g, 0.0, 2.0), Err(CellError::Num));
+    assert_eq!(array_constrain(&g, 2.0, 0.5), Err(CellError::Num));
+}
+
+#[test]
+fn is_between_googles_examples() {
+    let yes = |v: R| assert_eq!(v.unwrap(), Value::Bool(true));
+    let no = |v: R| assert_eq!(v.unwrap(), Value::Bool(false));
+    yes(is_between(&n(7.9), &n(1.2), &n(12.45), true, true));
+    yes(is_between(&n(1.2), &n(1.2), &n(12.45), true, true));
+    no(is_between(&n(1.2), &n(1.2), &n(12.45), false, true));
+    yes(is_between(&n(12.45), &n(1.2), &n(12.45), true, true));
+    no(is_between(&n(12.45), &n(1.2), &n(12.45), true, false));
+    yes(is_between(&n(7.9), &n(1.2), &n(12.45), false, false));
+    no(is_between(&n(20.0), &n(1.2), &n(12.45), true, true));
+    assert_eq!(is_between(&Value::Error(CellError::NA), &n(1.0), &n(2.0), true, true), Err(CellError::NA));
+}
+type R = Result<Value, CellError>;
+
+#[test]
+fn is_date_googles_examples() {
+    assert_eq!(is_date(&t("July 20 1969"), false, SYS), Value::Bool(true));
+    assert_eq!(is_date(&t("1969-20-07"), false, SYS), Value::Bool(true));
+    assert_eq!(is_date(&t("July"), false, SYS), Value::Bool(false));
+    assert_eq!(is_date(&t("Feb 30"), false, SYS), Value::Bool(false));
+    // A number is a date when its cell shows one.
+    assert_eq!(is_date(&n(45_000.0), true, SYS), Value::Bool(true));
+    assert_eq!(is_date(&n(45_000.0), false, SYS), Value::Bool(false));
+    assert_eq!(is_date(&t("2026-11-24"), false, SYS), Value::Bool(true));
+    assert_eq!(is_date(&t("hello"), false, SYS), Value::Bool(false));
+    assert_eq!(is_date(&t("12"), false, SYS), Value::Bool(false));
+    assert_eq!(is_date(&Value::Empty, false, SYS), Value::Bool(false));
+    assert_eq!(is_date(&Value::Error(CellError::NA), false, SYS), Value::Bool(false));
+    assert!(is_date_format("yyyy-mm-dd") && is_date_format("m/d/yyyy h:mm") && !is_date_format("h:mm") && !is_date_format("0.00"));
+}
+
+#[test]
+fn epochtodate_googles_examples() {
+    // Google's table: the date-times shown, to the second.
+    let at = |v: Value, day: f64, secs: f64| {
+        let Value::Number(x) = v else { panic!("{v:?}") };
+        let want = day + secs / 86_400.0;
+        assert!((x - want).abs() < 0.6 / 86_400.0, "{x} vs {want}");
+    };
+    at(epochtodate(1_655_906_568_893.0, 2.0, SYS).unwrap(), 44_734.0, 14.0 * 3600.0 + 2.0 * 60.0 + 49.0); // 6/22/2022 14:02:49
+    at(epochtodate(1_655_906_710.0, 1.0, SYS).unwrap(), 44_734.0, 14.0 * 3600.0 + 5.0 * 60.0 + 10.0); // 6/22/2022 14:05:10
+    assert_eq!(epochtodate(0.0, 2.0, SYS).unwrap(), n(25_569.0)); // 1/1/1970 0:00:00
+    at(epochtodate(1_584_033_897.0, 1.0, SYS).unwrap(), 43_902.0, 17.0 * 3600.0 + 24.0 * 60.0 + 57.0); // 3/12/2020 17:24:57
+    at(epochtodate(1_656_356_678_000_410.0, 3.0, SYS).unwrap(), 44_739.0, 19.0 * 3600.0 + 4.0 * 60.0 + 38.0); // 6/27/2022 19:04:38
+    // Fractions of a millisecond are dropped.
+    assert_eq!(epochtodate(1_500.9, 3.0, SYS), epochtodate(1.0, 2.0, SYS));
+    assert_eq!(epochtodate(-1.0, 1.0, SYS), Err(CellError::Num));
+    assert_eq!(epochtodate(1.0, 4.0, SYS), Err(CellError::Num));
+    assert_eq!(epochtodate(0.0, 1.0, DateSystem::D1904).unwrap(), n(24_107.0));
+}
+
+#[test]
+fn average_weighted_googles_examples() {
+    let close = |v: R, want: f64| {
+        let Ok(Value::Number(x)) = v else { panic!("{v:?}") };
+        assert!((x - want).abs() < 1e-9, "{x} vs {want}");
+    };
+    let a = col(vec![n(2.0), n(4.0)]);
+    let b = col(vec![n(1.0), n(3.0)]);
+    close(average_weighted(&[a.clone(), b.clone()]), 3.5);
+    close(average_weighted(&[n(2.0), n(10.0), n(4.0), n(15.0)]), 3.2);
+    close(average_weighted(&[a.clone(), b.clone(), n(8.0), n(6.0)]), 6.2);
+    let grades = col(vec![n(95.0), n(90.0), n(85.0), n(88.0), n(82.0)]);
+    let parts = col(vec![n(0.25), n(0.10), n(0.15), n(0.20), n(0.30)]);
+    close(average_weighted(&[grades, parts]), 87.7);
+    // Cells that aren't numbers leave their pair out.
+    close(average_weighted(&[col(vec![n(2.0), t("x"), n(4.0)]), col(vec![n(1.0), n(5.0), n(3.0)])]), 3.5);
+    // Errors: sizes differ, negative weight, weights all zero, odd count.
+    assert_eq!(average_weighted(&[a.clone(), n(1.0)]), Err(CellError::Value));
+    assert_eq!(average_weighted(&[n(1.0), n(-1.0)]), Err(CellError::Num));
+    assert_eq!(average_weighted(&[n(1.0), n(0.0)]), Err(CellError::Div0));
+    assert_eq!(average_weighted(&[a, b, n(1.0)]), Err(CellError::NA));
+    assert_eq!(average_weighted(&[n(1.0), Value::Error(CellError::Ref)]), Err(CellError::Ref));
+}
+
+#[test]
+fn parser_functions_return_the_value() {
+    assert_eq!(parser_identity(&n(25_405.0)).unwrap(), n(25_405.0));
+    assert_eq!(parser_identity(&n(0.5)).unwrap(), n(0.5));
+    assert_eq!(parser_identity(&t("abc")).unwrap(), t("abc"));
+    assert_eq!(parser_identity(&Value::Bool(true)).unwrap(), Value::Bool(true));
+    assert_eq!(parser_identity(&Value::Error(CellError::NA)), Err(CellError::NA));
 }

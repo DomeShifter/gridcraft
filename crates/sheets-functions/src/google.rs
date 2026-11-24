@@ -1,6 +1,9 @@
-//! Google Sheets' small functions that Excel doesn't have (StarSheets 0090): SPLIT, JOIN,
-//! REGEXMATCH, COUNTUNIQUE, FLATTEN, ISEMAIL, ISURL, TO_TEXT and the operator functions (ADD,
-//! MINUS, MULTIPLY, DIVIDE, POW, EQ, NE, GT, GTE, LT, LTE, UMINUS, UPLUS, UNARY_PERCENT).
+//! Google Sheets' small functions that Excel doesn't have. Batch 1 (StarSheets 0090): SPLIT,
+//! JOIN, REGEXMATCH, COUNTUNIQUE, FLATTEN, ISEMAIL, ISURL, TO_TEXT and the operator functions (ADD,
+//! MINUS, MULTIPLY, DIVIDE, POW, EQ, NE, GT, GTE, LT, LTE, UMINUS, UPLUS, UNARY_PERCENT). Batch 2
+//! (StarSheets 0091): Google's two-argument REGEXEXTRACT and the text rule of REGEXREPLACE,
+//! ARRAY_CONSTRAIN, ISBETWEEN, ISDATE, EPOCHTODATE, AVERAGE.WEIGHTED, TO_DATE, TO_DOLLARS,
+//! TO_PERCENT and TO_PURE_NUMBER.
 //!
 //! Each takes values already worked out and returns a value, so it is tested here on its own;
 //! `gridcraft-functions` registers them (`sheets.rs`). The operator functions take one value per
@@ -11,6 +14,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use gridcraft_core::{Array, CellError, DateSystem, Value, compare};
+use gridcraft_numfmt::{FormatKind, NumberFormat};
 
 type R<T> = Result<T, CellError>;
 
@@ -146,18 +150,49 @@ pub fn join(delimiter: &Value, values: &[Value]) -> R<Value> {
 /// case-sensitively (RE2 syntax). Sheets only takes text: a number or TRUE/FALSE is `#VALUE!` (an
 /// empty cell is empty text); an expression that isn't valid is `#REF!`, as in Sheets.
 pub fn regexmatch(text: &Value, pattern: &Value) -> R<Value> {
-    let s = match text {
-        Value::Text(t) => t.to_string(),
-        Value::Empty => String::new(),
-        Value::Error(e) => return Err(*e),
-        _ => return Err(CellError::Value),
-    };
+    let s = regex_text(text)?;
+    Ok(Value::Bool(regex(pattern)?.is_match(&s)))
+}
+
+/// The text Google's regular expression functions take: text only ("only works with text (not
+/// numbers) as input"), so a number or TRUE/FALSE is `#VALUE!`; an empty cell is empty text.
+pub fn regex_text(v: &Value) -> R<String> {
+    match v {
+        Value::Text(t) => Ok(t.to_string()),
+        Value::Empty => Ok(String::new()),
+        Value::Error(e) => Err(*e),
+        _ => Err(CellError::Value),
+    }
+}
+
+/// A regular expression as Google's functions read it (RE2 syntax, case-sensitive); one that isn't
+/// valid is `#REF!`, as Sheets shows it.
+pub fn regex(pattern: &Value) -> R<regex::Regex> {
     let p = pattern.to_text()?;
     if p.len() > MAX_TEXT {
         return Err(CellError::Value);
     }
-    let re = regex::RegexBuilder::new(&p).size_limit(1 << 22).dfa_size_limit(1 << 22).nest_limit(100).build().map_err(|_| CellError::Ref)?;
-    Ok(Value::Bool(re.is_match(&s)))
+    regex::RegexBuilder::new(&p).size_limit(1 << 22).dfa_size_limit(1 << 22).nest_limit(100).build().map_err(|_| CellError::Ref)
+}
+
+/// Google's REGEXEXTRACT(text, regular_expression), the two-argument form. (Excel's own
+/// REGEXEXTRACT takes a return mode as its third argument; with that given, Excel's rules apply.)
+/// - no capture groups: the first match ("the function returns the whole match");
+/// - one capture group: what it caught in the first match;
+/// - several: each group's text in a row of cells ("extract" and "values" in Google's example);
+///   a group that took no part is empty text.
+///
+/// No match is `#N/A`; text only, as REGEXMATCH.
+pub fn regexextract(text: &Value, pattern: &Value) -> R<Value> {
+    let s = regex_text(text)?;
+    let re = regex(pattern)?;
+    let caps = re.captures(&s).ok_or(CellError::NA)?;
+    let group = |i: usize| Value::text(caps.get(i).map_or("", |m| m.as_str()));
+    match caps.len() {
+        0 | 1 => Ok(group(0)),
+        2 => Ok(group(1)),
+        n => array(1, n - 1, (1..n).map(group).collect()),
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -362,4 +397,177 @@ pub fn uplus(v: &Value) -> R<Value> {
 /// trailing `%` does.
 pub fn unary_percent(v: &Value, sys: DateSystem) -> R<Value> {
     Ok(Value::number(v.to_number_in(sys)? / 100.0))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Batch 2 (StarSheets 0091): ARRAY_CONSTRAIN, ISBETWEEN, ISDATE, EPOCHTODATE, AVERAGE.WEIGHTED and
+// the parser functions
+
+/// ARRAY_CONSTRAIN(input_range, num_rows, num_cols): the top-left `num_rows` × `num_cols` of an
+/// array (all of it where it is smaller). Counts are truncated; less than 1 is `#NUM!`.
+pub fn array_constrain(v: &Value, rows: f64, cols: f64) -> R<Value> {
+    let (rows, cols) = (rows.trunc(), cols.trunc());
+    if rows.is_nan() || cols.is_nan() || rows < 1.0 || cols < 1.0 {
+        return Err(CellError::Num);
+    }
+    let Value::Array(a) = v else { return Ok(v.clone()) };
+    let r = a.rows.min(rows.min(MAX_CELLS as f64) as usize);
+    let c = a.cols.min(cols.min(MAX_CELLS as f64) as usize);
+    let mut data = Vec::with_capacity(r * c);
+    for i in 0..r {
+        data.extend_from_slice(&a.data[i * a.cols..i * a.cols + c]);
+    }
+    array(r, c, data)
+}
+
+/// ISBETWEEN(value_to_compare, lower_value, upper_value, [lower_value_is_inclusive],
+/// [upper_value_is_inclusive]): whether the value lies between the two, each end included unless
+/// its flag is FALSE (both default to TRUE). Values compare as `<` and `>` do (numbers and dates;
+/// text without case). An error value is the result.
+pub fn is_between(v: &Value, lo: &Value, hi: &Value, lo_inclusive: bool, hi_inclusive: bool) -> R<Value> {
+    for x in [v, lo, hi] {
+        if let Value::Error(e) = x {
+            return Err(*e);
+        }
+    }
+    use std::cmp::Ordering::*;
+    let above = match compare(v, lo) {
+        Greater => true,
+        Equal => lo_inclusive,
+        Less => false,
+    };
+    let below = match compare(v, hi) {
+        Less => true,
+        Equal => hi_inclusive,
+        Greater => false,
+    };
+    Ok(Value::Bool(above && below))
+}
+
+/// ISDATE(value): whether the value is a date.
+/// - A number is a date when its cell shows it as one (`date_formatted`, from the cell's number
+///   format: the evaluator knows it, a value alone doesn't).
+/// - Text is a date when it reads as one, as typing it would ("July 20 1969"; not "July" or
+///   "Feb 30"). Google's example `ISDATE("1969-20-07")` is TRUE, so a year-first date whose
+///   middle part can't be a month is also read as year, day, month.
+/// - Anything else, error values included, is FALSE.
+pub fn is_date(v: &Value, date_formatted: bool, sys: DateSystem) -> Value {
+    Value::Bool(match v {
+        Value::Number(_) => date_formatted,
+        Value::Text(t) => text_is_date(t, sys),
+        _ => false,
+    })
+}
+
+/// Whether a number format shows a calendar date (`yyyy-mm-dd`, `m/d/yyyy h:mm`; not `h:mm`).
+pub fn is_date_format(code: &str) -> bool {
+    NumberFormat::parse(code).kind() == FormatKind::Date
+}
+
+fn text_is_date(t: &str, sys: DateSystem) -> bool {
+    let reads = |t: &str| {
+        let p = gridcraft_core::parse::parse_input(t, sys);
+        matches!((p.value, p.format), (Value::Number(_), Some(f)) if is_date_format(f))
+    };
+    let t = t.trim();
+    if t.is_empty() || t.len() > 64 {
+        return false;
+    }
+    if reads(t) {
+        return true;
+    }
+    // yyyy-dd-mm (Google's own example).
+    let parts: Vec<&str> = t.split(['-', '/', '.']).collect();
+    if let [y, d, m] = parts[..]
+        && y.len() == 4
+        && d.parse::<u32>().is_ok_and(|d| d > 12)
+        && m.parse::<u32>().is_ok()
+    {
+        return reads(&format!("{y}-{m}-{d}"));
+    }
+    false
+}
+
+/// Days from the spreadsheet's day 0 to 1 January 1970, the Unix epoch (1900 date system).
+const EPOCH_1900: f64 = 25_569.0;
+/// The same in the 1904 date system.
+const EPOCH_1904: f64 = 24_107.0;
+/// The serial number of 31 December 9999, the last date a cell shows (1900 date system).
+const LAST_SERIAL: f64 = 2_958_465.0;
+
+/// EPOCHTODATE(timestamp, [unit]): a Unix timestamp as a date-time in UTC. `unit` 1 (the default)
+/// is seconds, 2 milliseconds, 3 microseconds; fractions of a millisecond are dropped. A negative
+/// timestamp is `#NUM!` ("Negative timestamps aren't accepted"), and so is another unit.
+pub fn epochtodate(timestamp: f64, unit: f64, sys: DateSystem) -> R<Value> {
+    if timestamp < 0.0 {
+        return Err(CellError::Num);
+    }
+    let ms = match unit.trunc() as i64 {
+        1 => timestamp * 1000.0,
+        2 => timestamp,
+        3 => timestamp / 1000.0,
+        _ => return Err(CellError::Num),
+    }
+    .trunc();
+    let day0 = match sys {
+        DateSystem::D1900 => EPOCH_1900,
+        DateSystem::D1904 => EPOCH_1904,
+    };
+    let serial = ms / 86_400_000.0 + day0;
+    if serial.is_finite() && serial < LAST_SERIAL + 1.0 { Ok(Value::number(serial)) } else { Err(CellError::Num) }
+}
+
+/// AVERAGE.WEIGHTED(values, weights, [additional values, additional weights] …): the sum of each
+/// value times its weight, divided by the sum of the weights.
+/// - Arguments come in pairs (an odd count is `#N/A`, Sheets' "wrong number of arguments"); a
+///   pair's values and weights have the same rows and columns (`#VALUE!` otherwise).
+/// - A value or weight that isn't a number (an empty cell, text) leaves its pair out.
+/// - A negative weight is `#NUM!` ("Weights cannot be negative"); weights adding up to 0 are
+///   `#DIV/0!` ("At least one of the weights must be positive"). An error value is the result.
+pub fn average_weighted(args: &[Value]) -> R<Value> {
+    if args.len() < 2 || !args.len().is_multiple_of(2) {
+        return Err(CellError::NA);
+    }
+    let shape = |v: &Value| match v {
+        Value::Array(a) => (a.rows, a.cols),
+        _ => (1, 1),
+    };
+    let (mut sum, mut weights) = (0.0, 0.0);
+    for pair in args.chunks(2) {
+        let [values, w] = pair else { break };
+        if shape(values) != shape(w) {
+            return Err(CellError::Value);
+        }
+        for (x, y) in cells(values).iter().zip(cells(w)) {
+            if let Value::Error(e) = x {
+                return Err(*e);
+            }
+            if let Value::Error(e) = y {
+                return Err(*e);
+            }
+            let (Value::Number(x), Value::Number(y)) = (x, y) else { continue };
+            if *y < 0.0 {
+                return Err(CellError::Num);
+            }
+            sum += x * y;
+            weights += y;
+        }
+    }
+    if weights == 0.0 {
+        return Err(CellError::Div0);
+    }
+    let r = sum / weights;
+    if r.is_finite() { Ok(Value::number(r)) } else { Err(CellError::Num) }
+}
+
+/// TO_DATE, TO_DOLLARS, TO_PERCENT and TO_PURE_NUMBER(value): a number comes back as it is, and
+/// so does anything else ("returned without modification"). In Sheets the first three also show
+/// the number as a date, dollars or a percentage, and the last drops the formatting; a function's
+/// result carries no number format here, so the cell's own format shows it.
+pub fn parser_identity(v: &Value) -> R<Value> {
+    match v {
+        Value::Error(e) => Err(*e),
+        Value::Array(a) => Ok(a.data.first().cloned().unwrap_or(Value::Empty)),
+        v => Ok(v.clone()),
+    }
 }
