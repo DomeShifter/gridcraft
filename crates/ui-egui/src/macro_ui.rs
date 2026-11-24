@@ -198,11 +198,11 @@ pub fn forget_closed_editor(app: &mut SheetApp) {
 
 /// The prompt for [`MacroUi::question`]: its text, a button for each choice and Cancel.
 pub fn question_box(app: &mut SheetApp, ctx: &egui::Context) {
-    if app.message.is_some() {
+    if app.message.is_some() || !app.chrome.questions {
         return;
     }
     let Some(q) = app.macros.question.clone() else { return };
-    let mut answer: Option<Option<Json>> = None;
+    let mut answer: Option<Option<usize>> = None;
     egui::Modal::new(egui::Id::unique("gridcraft.macro_question")).show(ctx, |ui| {
         ui.set_width(400.0);
         ui.label(egui::RichText::new(&q.title).strong());
@@ -214,24 +214,33 @@ pub fn question_box(app: &mut SheetApp, ctx: &egui::Context) {
             }
             // Right to left: list the choices reversed, so the first one ends up next to Cancel
             // and Enter picks it.
-            for (k, (label, extra)) in q.choices.iter().enumerate().rev() {
+            for (k, (label, _)) in q.choices.iter().enumerate().rev() {
                 if ui.add(egui::Button::new(label.as_str()).min_size(vec2(72.0, 0.0))).clicked()
                     || (k == 0 && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                 {
-                    answer = Some(Some(extra.clone()));
+                    answer = Some(Some(k));
                 }
             }
         });
     });
-    match answer {
+    if let Some(choice) = answer {
+        self::answer(app, choice);
+    }
+}
+
+/// Answers [`MacroUi::question`]: `Some(k)` runs its command again with choice `k`, `None`
+/// cancels. For a host that draws the question itself (`Chrome::questions` off).
+pub fn answer(app: &mut SheetApp, choice: Option<usize>) {
+    let Some(q) = app.macros.question.clone() else { return };
+    match choice.and_then(|k| q.choices.get(k)).map(|(_, extra)| extra.clone()) {
         // Another workbook became active meanwhile (an agent): the answer would run there.
-        Some(Some(_)) if app.session.active().is_none_or(|d| d.uid != q.doc) => {
+        Some(_) if app.session.active().is_none_or(|d| d.uid != q.doc) => {
             app.macros.question = None;
             let book = app.session.documents().iter().find(|d| d.uid == q.doc).map(|d| d.display_title()).unwrap_or_default();
             app.message =
                 Some((q.title.clone(), format!("The question was about “{book}”, which is no longer the active workbook, so nothing was done.")));
         }
-        Some(Some(extra)) => {
+        Some(extra) => {
             app.macros.question = None;
             let mut params = q.params.clone();
             if let (Some(m), Some(extra)) = (params.as_object_mut(), extra.as_object()) {
@@ -240,8 +249,7 @@ pub fn question_box(app: &mut SheetApp, ctx: &egui::Context) {
             // A second question (approve, then make room) asks again.
             call(app, &q.title, &q.command, params);
         }
-        Some(None) => app.macros.question = None,
-        None => {}
+        None => app.macros.question = None,
     }
 }
 

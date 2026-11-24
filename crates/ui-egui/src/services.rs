@@ -67,10 +67,14 @@ pub struct Chrome {
     /// The sheet tab strip and the status bar under the grid. A host that draws its own sheet
     /// tabs and selection summary turns it off.
     pub sheet_tabs: bool,
+    /// The prompt for a command's question ("There's already data here. Do you want to replace
+    /// it?"). A host that draws its own dialogs turns it off and shows `SheetApp::macros.question`
+    /// itself, answering with `macro_ui::answer`.
+    pub questions: bool,
 }
 
 impl Default for Chrome {
     fn default() -> Self {
-        Chrome { title_bar: true, file_tab: true, ribbon: true, sheet_tabs: true }
+        Chrome { title_bar: true, file_tab: true, ribbon: true, sheet_tabs: true, questions: true }
     }
 }
