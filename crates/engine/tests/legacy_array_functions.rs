@@ -99,7 +99,7 @@ fn array_call(spec: &FnSpec) -> Option<String> {
 fn array_calls() -> Vec<String> {
     // Google-only functions (StarSheets) always spill, as in Google Sheets: an Excel file cannot
     // hold them as legacy formulas (Google's export wraps them in __xludf.DUMMYFUNCTION).
-    const GOOGLE_ONLY: [&str; 4] = ["SORTN(", "ARRAYFORMULA(", "ARRAY_ROW(", "ARRAY_LITERAL("];
+    const GOOGLE_ONLY: [&str; 6] = ["SORTN(", "ARRAYFORMULA(", "ARRAY_ROW(", "ARRAY_LITERAL(", "SPLIT(", "FLATTEN("];
     let mut calls: Vec<String> =
         gridcraft_functions::all().iter().filter_map(array_call).filter(|c| !GOOGLE_ONLY.iter().any(|g| c.starts_with(g))).collect();
     for found in ["MUNIT", "MODE.MULT", "TEXTSPLIT", "REGEXEXTRACT", "MMULT", "SEQUENCE"] {

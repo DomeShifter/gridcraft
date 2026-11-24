@@ -779,7 +779,7 @@ fn google_style(e: &Expr) -> bool {
     let mut found = false;
     e.walk(&mut |x| {
         found |= match x {
-            Expr::Call(n, _) => matches!(n.to_ascii_uppercase().as_str(), "ARRAY_LITERAL" | "ARRAY_ROW" | "ARRAYFORMULA" | "QUERY" | "SORTN"),
+            Expr::Call(n, _) => matches!(n.to_ascii_uppercase().as_str(), "ARRAY_LITERAL" | "ARRAY_ROW" | "ARRAYFORMULA" | "QUERY" | "SORTN" | "SPLIT" | "FLATTEN"),
             Expr::Ref(r) => matches!(&r.kind, gridcraft_formula::RefKind::Range(a, b) if b.row == gridcraft_core::MAX_ROWS - 1 && !b.row_abs && a.row < b.row && a.row > 0),
             _ => false,
         }

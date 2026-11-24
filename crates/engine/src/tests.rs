@@ -6673,6 +6673,61 @@ fn google_only_formulas_save_in_googles_export_wrapper() {
 }
 
 #[test]
+fn google_function_batch_1_calculates_and_saves_in_the_wrapper() {
+    // StarSheets 0090: SPLIT, JOIN, COUNTUNIQUE, FLATTEN, ISEMAIL, REGEXMATCH, TO_TEXT and the
+    // operator functions calculate, save in Google's export wrapper (Excel has none of them) and
+    // come back as typed, with the same values.
+    use std::io::Read;
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["a,b,c", 3], ["x@y.com", 4]]})).unwrap();
+    let cells = [
+        ("D1", "=SPLIT(A1,\",\")"),
+        ("D3", "=JOIN(\"-\",B1:B2)"),
+        ("D4", "=COUNTUNIQUE(B1:B2,3)"),
+        ("D5", "=ADD(B1,B2)"),
+        ("D6", "=ISEMAIL(A2)"),
+        ("D7", "=REGEXMATCH(A1,\"b\")"),
+        ("D8", "=TO_TEXT(B1)"),
+        ("D9", "=GTE(B2,B1)"),
+        ("H1", "=FLATTEN(B1:B2)"),
+    ];
+    for (c, f) in cells {
+        s.execute("cell.set", json!({"cell": c, "input": f})).unwrap();
+    }
+    let want = [
+        ("D1", Value::text("a")),
+        ("E1", Value::text("b")),
+        ("F1", Value::text("c")),
+        ("D3", Value::text("3-4")),
+        ("D4", Value::Number(2.0)),
+        ("D5", Value::Number(7.0)),
+        ("D6", Value::Bool(true)),
+        ("D7", Value::Bool(true)),
+        ("D8", Value::text("3")),
+        ("D9", Value::Bool(true)),
+        ("H1", Value::Number(3.0)),
+        ("H2", Value::Number(4.0)),
+    ];
+    for (c, w) in &want {
+        assert_eq!(&v(&s, c), w, "{c}");
+    }
+    let wb = s.doc().unwrap().wb.clone();
+    let bytes = crate::io::save_bytes(&wb, "x.xlsx").unwrap();
+    let mut xml = String::new();
+    zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap().by_name("xl/worksheets/sheet1.xml").unwrap().read_to_string(&mut xml).unwrap();
+    assert!(xml.contains(r#"DUMMYFUNCTION("ADD(B1,B2)"),7)"#), "{xml}");
+    assert!(xml.contains(r#"DUMMYFUNCTION("JOIN(""-"",B1:B2)"),"3-4")"#), "{xml}");
+    s.execute("file.open", json!({"name": "x", "base64": crate::io::base64_encode(&bytes)})).unwrap();
+    for (c, f) in cells {
+        let got = s.execute("cell.get", json!({"cell": c})).unwrap()["formula"].clone();
+        assert_eq!(got.as_str().unwrap(), f, "{c}");
+    }
+    for (c, w) in &want {
+        assert_eq!(&v(&s, c), w, "{c}");
+    }
+}
+
+#[test]
 fn host_data_is_an_undoable_edit_and_saved_in_the_file() {
     let mut s = s();
     s.execute("workbook.setHostData", json!({"data": "{\"v\":1}"})).unwrap();
