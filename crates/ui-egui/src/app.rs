@@ -61,6 +61,7 @@ impl SheetApp {
             fonts_web_seen: 0,
             fonts_seen: (0, 0),
             fonts_rebind: false,
+            fonts_bound_next: None,
             fonts_han: None,
             effective_dark: false,
             desktop_theme: desktop_theme::DesktopTheme::default(),
@@ -192,7 +193,9 @@ impl SheetApp {
     /// Lays out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        if !self.fonts_ready || self.fonts_rebind {
+        // Only startup (and a language change) waits for fonts; a workbook-font rebind paints
+        // in the active set while the new one is pending (`fonts_rebind`).
+        if !self.fonts_ready {
             ctx.request_repaint();
             return;
         }
@@ -375,7 +378,7 @@ mod lifecycle_tests {
         app.synthetic.push_back(vec![key_event(true)]);
 
         // The font gate returns before input handling; `begin_pass` has still consumed the events.
-        app.fonts_rebind = true;
+        app.fonts_ready = false;
         let mut raw = raw_with_size(egui::vec2(900.0, 700.0));
         app.raw_input_hook(&ctx, &mut raw);
         assert_eq!(raw.events.len(), 1);
@@ -384,13 +387,47 @@ mod lifecycle_tests {
         assert_eq!(app.synthetic.len(), 1, "the step is still queued");
 
         // A completed pass that did not apply it made the hook offer it again for a real pass.
-        app.fonts_rebind = false;
+        app.fonts_ready = true;
         let mut raw = raw_with_size(egui::vec2(900.0, 700.0));
         app.raw_input_hook(&ctx, &mut raw);
         assert_eq!(raw.events.len(), 1, "the step is not lost across the font gate");
         let _ = ui_pass(&ctx, raw, |ui| app.ui(ui));
         assert!(!app.synthetic_pending);
         assert!(app.synthetic.is_empty(), "the real UI pass applied the step");
+    }
+
+    #[test]
+    /// A workbook-font rebind (e.g. a web face arriving while a file opens) still paints the grid
+    /// that frame, with the active set's families, and switches to the new set's families only
+    /// once egui has made that set live (the next pass).
+    fn a_font_rebind_paints_and_switches_families_a_frame_later() {
+        let _lock = crate::fonts::TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let ctx = egui::Context::default();
+        ctx.set_fonts(theme::font_definitions());
+        let mut app = app();
+        app.fonts_ready = true;
+        app.fonts_set = true;
+        let _ = ctx.run_logic(&egui::RawInput::default(), |ctx| app.logic(ctx));
+        let _ = ui_pass(&ctx, raw_with_size(egui::vec2(900.0, 700.0)), |ui| app.ui(ui));
+
+        // Stands for a family only the active set has; a new web face bumps the generation.
+        let marker = "fnt:Active Set Only:nn".to_string();
+        let mut active = crate::fonts::bound_families();
+        active.push(marker.clone());
+        crate::fonts::set_bound(active);
+        crate::fonts::keep_families(Vec::new());
+        app.fonts_seen = (u64::MAX, u64::MAX);
+        app.rebind_workbook_fonts(&ctx);
+        assert!(app.fonts_rebind, "the new set is pending");
+        assert!(crate::fonts::is_bound(&marker), "the active set's families stay named this frame");
+
+        app.perf.grid_ms = -1.0;
+        let _ = ui_pass(&ctx, raw_with_size(egui::vec2(900.0, 700.0)), |ui| app.ui(ui));
+        assert!(app.perf.grid_ms >= 0.0, "the grid painted during the rebind frame");
+
+        let _ = ctx.run_logic(&egui::RawInput::default(), |ctx| app.logic(ctx));
+        assert!(!app.fonts_rebind);
+        assert!(!crate::fonts::is_bound(&marker), "the new set's families once it is live");
     }
 
     #[test]
