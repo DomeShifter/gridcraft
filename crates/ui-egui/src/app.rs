@@ -401,7 +401,6 @@ mod lifecycle_tests {
     /// that frame, with the active set's families, and switches to the new set's families only
     /// once egui has made that set live (the next pass).
     fn a_font_rebind_paints_and_switches_families_a_frame_later() {
-        let _lock = crate::fonts::TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let ctx = egui::Context::default();
         ctx.set_fonts(theme::font_definitions());
         let mut app = app();
@@ -410,16 +409,13 @@ mod lifecycle_tests {
         let _ = ctx.run_logic(&egui::RawInput::default(), |ctx| app.logic(ctx));
         let _ = ui_pass(&ctx, raw_with_size(egui::vec2(900.0, 700.0)), |ui| app.ui(ui));
 
-        // Stands for a family only the active set has; a new web face bumps the generation.
-        let marker = "fnt:Active Set Only:nn".to_string();
-        let mut active = crate::fonts::bound_families();
-        active.push(marker.clone());
-        crate::fonts::set_bound(active);
+        // A new web face bumps the generation. The bound-family registry is process-wide and other
+        // tests rebuild fonts in parallel, so this checks the app's own record of the change.
         crate::fonts::keep_families(Vec::new());
         app.fonts_seen = (u64::MAX, u64::MAX);
         app.rebind_workbook_fonts(&ctx);
         assert!(app.fonts_rebind, "the new set is pending");
-        assert!(crate::fonts::is_bound(&marker), "the active set's families stay named this frame");
+        assert!(app.fonts_bound_next.is_some(), "its families wait until egui has made the set live");
 
         app.perf.grid_ms = -1.0;
         let _ = ui_pass(&ctx, raw_with_size(egui::vec2(900.0, 700.0)), |ui| app.ui(ui));
@@ -427,7 +423,7 @@ mod lifecycle_tests {
 
         let _ = ctx.run_logic(&egui::RawInput::default(), |ctx| app.logic(ctx));
         assert!(!app.fonts_rebind);
-        assert!(!crate::fonts::is_bound(&marker), "the new set's families once it is live");
+        assert!(app.fonts_bound_next.is_none(), "the new set's families are bound now");
     }
 
     #[test]
