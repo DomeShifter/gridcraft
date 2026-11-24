@@ -569,6 +569,9 @@ fn show_edit<'t>(
 
 /// The text editor used in the cell and in the formula bar (they share `app.editor`). It shows
 /// `max_height` of text and scrolls beyond that, keeping the caret in view.
+/// Where the in-cell editor (grid/editor.rs) leaves the edited cell's font colour.
+pub(crate) const CELL_INK: &str = "gridcraft.cell_editor.ink";
+
 pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: FontId, multiline: bool, width: f32, max_height: f32) -> EditorInfo {
     if app.editor.as_ref().is_some_and(|e| e.python) {
         // Python mode edits in the formula bar only.
@@ -588,6 +591,12 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
     let t = Tokens::get(ui.ctx());
     let on_sheet = id == egui::Id::unique("gridcraft.cell_editor");
     let cell_text_color = if on_sheet { t.cell_text } else { t.text };
+    // Plain text in the cell keeps the cell's font colour (grid/editor.rs leaves it here).
+    let cell_ink = if on_sheet {
+        ui.ctx().data(|d| d.get_temp::<Option<egui::Color32>>(egui::Id::unique(CELL_INK))).flatten().unwrap_or(cell_text_color)
+    } else {
+        cell_text_color
+    };
     let font2 = font.clone();
     let reading_order = cell_reading_order(app, ed.sheet, ed.cell);
     let mut layouter = move |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| {
@@ -605,7 +614,7 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
             let pieces = crate::spelling::pieces(s);
             let last = pieces.len().saturating_sub(1);
             for (i, (piece, word)) in pieces.into_iter().enumerate() {
-                let mut f = egui::TextFormat::simple(font2.clone(), cell_text_color);
+                let mut f = egui::TextFormat::simple(font2.clone(), cell_ink);
                 let typing = i == last;
                 if word && !typing && piece.chars().count() > 1 && !known(piece) {
                     f.underline = egui::Stroke::new(1.5, egui::Color32::from_rgb(0xD9, 0x30, 0x25));
@@ -615,7 +624,8 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
             job.wrap.max_width = if multiline { wrap_width } else { f32::INFINITY };
             return ui.fonts_mut(|f| f.layout_job(job));
         }
-        let mut job = formula_job(s, &refs, &font2, cell_text_color, &t, on_sheet);
+        let ink = if s.trim_start().starts_with('=') { cell_text_color } else { cell_ink };
+        let mut job = formula_job(s, &refs, &font2, ink, &t, on_sheet);
         job.direction = crate::text_direction::cell_direction(reading_order, s);
         job.wrap.max_width = if multiline { wrap_width } else { f32::INFINITY };
         ui.fonts_mut(|f| f.layout_job(job))
