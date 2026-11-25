@@ -682,7 +682,13 @@ pub fn flash_fill_preview(wb: &Workbook, sheet: usize, at: CellRef) -> Vec<(Cell
     // as Google Sheets and Excel do, when there are other examples to learn from.
     let program = learn(&examples).or_else(|| if header && examples.len() > 1 { learn(&examples[1..]) } else { None });
     let Some(program) = program else { return Vec::new() };
-    todo.into_iter().filter_map(|(r, src)| program.apply(&src).map(|out| (CellRef::new(r, at.col), out))).collect()
+    // A row whose result would be its whole source text ("Total" under a list of names) breaks
+    // the pattern rather than follows it, unless the examples copy their source too
+    // (StarSheets 0101).
+    let copies = examples.iter().any(|(src, out)| src == out);
+    todo.into_iter()
+        .filter_map(|(r, src)| program.apply(&src).filter(|out| copies || *out != src).map(|out| (CellRef::new(r, at.col), out)))
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -838,6 +844,12 @@ mod tests {
         assert_eq!(flash_fill_preview(wb, 0, CellRef::new(1, 1)), want);
         assert!(flash_fill_preview(wb, 0, CellRef::new(1, 0)).is_empty(), "nothing to the left");
         assert!(flash_fill_preview(wb, 0, CellRef::new(1, 2)).is_empty(), "no examples in column C");
+        // A row that would just copy its source ("Total") is left alone (StarSheets 0101).
+        let mut t = crate::Session::new();
+        t.new_workbook();
+        let values = serde_json::json!([["Ada Lovelace", "Ada"], ["Alan Turing", "Alan"], ["Grace Hopper", null], ["Total", null]]);
+        t.execute("range.setValues", serde_json::json!({"range": "A1", "values": values})).unwrap();
+        assert_eq!(flash_fill_preview(&t.doc().unwrap().wb, 0, CellRef::new(2, 1)), vec![(CellRef::new(2, 1), "Grace".to_string())]);
         // A header row above the examples is skipped.
         let mut h = crate::Session::new();
         h.new_workbook();
