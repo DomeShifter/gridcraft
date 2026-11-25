@@ -289,7 +289,7 @@ impl<'h> Evaluator<'h> {
                 let [a] = areas.as_slice() else { return err(CellError::Value) };
                 let range = self.trim_lines(a);
                 let (rows, cols) = (range.height() as usize, range.width() as usize);
-                if rows.saturating_mul(cols) > MAX_CELLS {
+                if (rows as u64).saturating_mul(cols as u64) > MAX_CELLS {
                     return err(CellError::Num);
                 }
                 let mut out = Vec::with_capacity(rows * cols);
