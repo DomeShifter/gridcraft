@@ -1367,7 +1367,7 @@ mod tests {
         is_text(ev("FILTER", vec![rf(grid()), av(col(&[0.0, 0.0, 0.0])), t("none")]), "none");
         is_err(ev("FILTER", vec![rf(grid()), av(col(&[1.0, 0.0]))]), CellError::Value);
         let errinc = arr(vec![vec![nv(1.0)], vec![Value::Error(CellError::Div0)], vec![nv(1.0)]]);
-        is_err(ev("FILTER", vec![rf(grid()), av(errinc)]), CellError::Div0);
+        is_err(ev("FILTER", vec![rf(grid()), av(errinc.clone())]), CellError::Div0);
         // Google Sheets: FILTER(range, condition1, condition2, …) keeps rows passing all of them.
         let c1 = || av(col(&[1.0, 1.0, 0.0]));
         let c2 = || av(col(&[1.0, 0.0, 1.0]));
