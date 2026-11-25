@@ -743,3 +743,82 @@ fn find_and_replace_within_the_selection() {
     let all = s.execute("edit.find", json!({"what": "pear", "all": true})).unwrap();
     assert_eq!(all["count"], 3, "A1, A3 and A4 on the whole sheet");
 }
+
+/// A workbook with a bold number, a formula on it, a drop-down rule and a merged pair, copied
+/// with its HTML (as the UI copies to the system clipboard): (session, text, html).
+fn copied_for_another_window() -> (Session, String, String) {
+    let mut s = Session::new();
+    s.new_workbook();
+    s.execute("cell.set", json!({"cell": "A1", "input": "21"})).unwrap();
+    s.execute("cell.set", json!({"cell": "B1", "input": "=A1*2"})).unwrap();
+    s.execute("home.bold", json!({"range": "A1"})).unwrap();
+    s.execute("data.validation", json!({"range": "A1:A2", "type": "list", "formula1": "\"21,22\""})).unwrap();
+    s.execute("cell.set", json!({"cell": "A2", "input": "22"})).unwrap();
+    s.execute("home.mergeCenter", json!({"range": "B2:C2"})).unwrap();
+    let out = s.execute("edit.copy", json!({"range": "A1:C2", "html": true})).unwrap();
+    (s, out["text"].as_str().unwrap().to_string(), out["html"].as_str().unwrap().to_string())
+}
+
+/// Google Sheets pastes everything between its own files: a copy pasted in another window (here
+/// another session, as another browser tab is) brings its formulas, moved, its formatting, its
+/// validation and its merged cells, from the data the copy put in its HTML.
+#[test]
+fn a_copy_pastes_whole_in_another_window() {
+    let (_, text, html) = copied_for_another_window();
+    assert!(html.contains("data-gridcraft-clip=\""), "{html}");
+    let mut t = Session::new();
+    t.new_workbook();
+    t.execute("edit.paste", json!({"at": "C3", "text": text, "html": html})).unwrap();
+    let get = |t: &mut Session, c: &str| t.execute("cell.get", json!({"cell": c})).unwrap();
+    let c3 = get(&mut t, "C3");
+    assert_eq!((c3["value"].clone(), c3["style"]["font"]["bold"].clone()), (json!(21.0), json!(true)), "{c3}");
+    let d3 = get(&mut t, "D3");
+    assert_eq!((d3["formula"].clone(), d3["value"].clone()), (json!("=C3*2"), json!(42.0)), "{d3}");
+    assert_eq!(get(&mut t, "D4")["merge"], json!("D4:E4"));
+    let d = t.doc().unwrap();
+    let sh = d.wb.active().unwrap();
+    assert!(sh.validations.iter().any(|dv| dv.ranges.contains(&RangeRef::parse("C3:C4").unwrap())), "{:?}", sh.validations);
+    // Clipboard data may come from any program: it counts as content from a file.
+    assert_eq!(d.trust, crate::Trust::FromFile);
+}
+
+/// Ctrl+Shift+V (values only): the results, without the formulas or the copy's formatting, and
+/// the destination keeps its own formatting and validation. From another window too.
+#[test]
+fn values_only_pastes_results_and_keeps_the_destinations_rules() {
+    let (mut s, text, html) = copied_for_another_window();
+    s.execute("data.validation", json!({"range": "A5", "type": "whole", "operator": "greater", "formula1": "0"})).unwrap();
+    s.execute("home.italic", json!({"range": "B5"})).unwrap();
+    s.execute("edit.paste", json!({"at": "A5", "text": text, "what": "values"})).unwrap();
+    let get = |s: &mut Session, c: &str| s.execute("cell.get", json!({"cell": c})).unwrap();
+    let (a5, b5) = (get(&mut s, "A5"), get(&mut s, "B5"));
+    assert_eq!((a5["value"].clone(), a5["style"]["font"]["bold"].clone()), (json!(21.0), json!(false)), "{a5}");
+    assert_eq!((b5["formula"].clone(), b5["value"].clone(), b5["style"]["font"]["italic"].clone()), (Json::Null, json!(42.0), json!(true)), "{b5}");
+    let sh = s.doc().unwrap().wb.active().unwrap().clone();
+    let a5_rules: Vec<_> = sh.validations.iter().filter(|dv| dv.ranges.iter().any(|r| r.contains(CellRef::new(4, 0)))).collect();
+    assert_eq!(a5_rules.len(), 1, "{:?}", sh.validations);
+    assert_eq!(a5_rules[0].kind, gridcraft_model::ValidationKind::Whole);
+    let mut t = Session::new();
+    t.new_workbook();
+    t.execute("edit.paste", json!({"at": "A1", "text": text, "html": html, "what": "values"})).unwrap();
+    let b1 = get(&mut t, "B1");
+    assert_eq!((b1["formula"].clone(), b1["value"].clone()), (Json::Null, json!(42.0)), "{b1}");
+    assert_eq!(get(&mut t, "A1")["style"]["font"]["bold"], json!(false));
+    assert!(t.doc().unwrap().wb.active().unwrap().validations.is_empty());
+}
+
+/// The HTML's data counts only for the text it was copied as: other text pastes as text, and
+/// damaged data is ignored rather than trusted.
+#[test]
+fn clipboard_data_for_other_text_or_damaged_is_ignored() {
+    let (_, text, html) = copied_for_another_window();
+    let mut t = Session::new();
+    t.new_workbook();
+    t.execute("edit.paste", json!({"at": "A1", "text": "7\t8", "html": html})).unwrap();
+    assert_eq!(t.execute("cell.get", json!({"cell": "B1"})).unwrap()["formula"], Json::Null);
+    assert!(t.clipboard.is_none());
+    let damaged = html.replacen("data-gridcraft-clip=\"", "data-gridcraft-clip=\"!!", 1);
+    t.execute("edit.paste", json!({"at": "A1", "text": text, "html": damaged})).unwrap();
+    assert_eq!(t.execute("cell.get", json!({"cell": "B1"})).unwrap()["formula"], Json::Null);
+    assert!(t.execute("edit.paste", json!({"text": text, "what": "formats"})).is_err());
+}

@@ -10,6 +10,7 @@ pub mod catalog;
 pub mod cf;
 mod chart_svg;
 mod clip_html;
+mod clip_payload;
 pub mod cmd;
 pub mod display;
 pub mod fill;

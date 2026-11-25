@@ -58,6 +58,8 @@ fn copy_impl(s: &mut Session, p: &Json, cut: bool) -> Result<Json> {
     // scripts get it only when they ask for it.
     let html = if p.get("html").and_then(Json::as_bool) == Some(true) { crate::io::range_html(&wb, sheet, range, &text) } else { None };
     let clip = Clipboard { wb, sheet, range, cut, doc_uid: d.uid, text: text.clone(), areas, selected, trust: d.trust };
+    // The cells ride along as data, for a paste in another window (crate::clip_payload).
+    let html = html.map(|h| crate::clip_payload::embed(h, &clip));
     s.clipboard = Some(clip);
     let mut result = json!({"range": range.a1(), "text": text});
     if let Some(html) = html {
@@ -262,16 +264,26 @@ pub(super) enum What {
 }
 
 pub(super) fn paste(s: &mut Session, p: &Json) -> Result<Json> {
+    // `what`: "all" (the default) or "values" (Google Sheets' Ctrl+Shift+V: the copied cells'
+    // results, keeping the destination's formatting and validation).
+    let what = match str_param(p, "what").unwrap_or("all") {
+        w @ ("all" | "values") => w,
+        other => return Err(bad("edit.paste", format!("unknown `what`: {other}"))),
+    };
     // External text (from the system clipboard) when it differs from ours.
     if let Some(text) = str_param(p, "text")
         && s.clipboard.as_ref().is_none_or(|c| c.text.trim_end_matches(['\r', '\n']) != text.trim_end_matches(['\r', '\n']))
     {
-        return paste_text(s, p, text);
+        // Copied in another window of the app: its HTML carries the cells, pasted as ours.
+        match str_param(p, "html").and_then(|html| crate::clip_payload::extract(html, text)) {
+            Some(clip) => s.clipboard = Some(clip),
+            None => return paste_text(s, p, text),
+        }
     }
     if s.clipboard.is_none() {
         return Err(EngineError::Other("Nothing to paste.".into()));
     }
-    paste_special(s, &json!({"what": "all", "at": p.get("at").cloned().unwrap_or(Json::Null)}))
+    paste_special(s, &json!({"what": what, "at": p.get("at").cloned().unwrap_or(Json::Null)}))
 }
 
 /// Drag and drop (dragging the selection's border): moves `range` so its top-left cell lands on

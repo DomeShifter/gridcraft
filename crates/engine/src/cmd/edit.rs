@@ -86,7 +86,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Paste",
             ["Home", "Clipboard"],
             Some("Cmd+V"),
-            "{at?: \"C3\", text?: \"tab-separated text from the system clipboard\", html?: \"the clipboard's HTML flavour; cells the source recorded as numbers (x:num, sdval) stay numbers\"}",
+            "{at?: \"C3\", text?: \"tab-separated text from the system clipboard\", html?: \"the clipboard's HTML flavour; cells the source recorded as numbers (x:num, sdval) stay numbers, and a copy made in another GridCraft window pastes with its formulas, formats, notes and validation\", what?: \"all\" | \"values\"}",
             has_doc,
             paste
         ),
