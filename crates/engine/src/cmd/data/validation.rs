@@ -1,3 +1,5 @@
+use gridcraft_model::{DropdownDisplay, ItemColor, MAX_ITEM_COLORS, split_selections};
+
 use super::{
     Cell, CellRef, CfOperator, EngineError, ErrorStyle, Json, RangeRef, Result, Session, Validation, ValidationKind, Value, Workbook, bad,
     bool_param, cell_param, edit, json, ok, str_param, target_ranges, target_sheet,
@@ -157,6 +159,24 @@ pub(super) fn validation(s: &mut Session, p: &Json) -> Result<Json> {
         Some("information") => ErrorStyle::Information,
         Some(other) => return Err(bad("data.validation", format!("unknown errorStyle `{other}` (stop, warning, information)"))),
     };
+    let display = match str_param(p, "display") {
+        None | Some("arrow") => DropdownDisplay::Arrow,
+        Some("chip") => DropdownDisplay::Chip,
+        Some("plain") => DropdownDisplay::Plain,
+        Some(other) => return Err(bad("data.validation", format!("unknown display `{other}` (arrow, chip, plain)"))),
+    };
+    let mut item_colors = Vec::new();
+    if let Some(list) = p.get("itemColors").filter(|v| !v.is_null()) {
+        let Some(list) = list.as_array() else { return Err(bad("data.validation", "`itemColors` is a list of {item, color}")) };
+        for e in list.iter().take(MAX_ITEM_COLORS) {
+            let item = e.get("item").and_then(Json::as_str).map(str::trim).unwrap_or("");
+            let color = crate::cmd::format::color_param(e.get("color")).filter(|c| *c != gridcraft_model::Color::Auto);
+            match color {
+                Some(color) if !item.is_empty() => item_colors.push(ItemColor { item: item.to_string(), color }),
+                _ => return Err(bad("data.validation", "each `itemColors` entry needs an `item` and a `color` (#RRGGBB)")),
+            }
+        }
+    }
     let f1 = str_param(p, "formula1").unwrap_or("");
     let f1 = if kind == ValidationKind::List { list_source(f1) } else { f1.trim_start_matches('=').to_string() };
     let dv = Validation {
@@ -174,6 +194,9 @@ pub(super) fn validation(s: &mut Session, p: &Json) -> Result<Json> {
         error_message: str_param(p, "errorMessage").unwrap_or("").into(),
         error_style,
         show_error: true,
+        multiple: kind == ValidationKind::List && bool_param(p, "multiple").unwrap_or(false),
+        display: if kind == ValidationKind::List { display } else { DropdownDisplay::Arrow },
+        item_colors: if kind == ValidationKind::List { item_colors } else { Vec::new() },
     };
     edit(s, |cx| {
         let sh = cx.sheet_mut(sheet)?;
@@ -258,7 +281,17 @@ pub fn check_validation(wb: &Workbook, sheet: usize, at: CellRef, input: &str) -
     let ok = match dv.kind {
         // The list is the one the dropdown showed before the entry, as in Excel: a source that takes
         // in the cell itself (`=$A1:$A2` on A2:A3 is A2:A3 at A3) doesn't list the value being typed.
-        ValidationKind::List => list_items(original, sheet, at, dv).iter().any(|x| x.eq_ignore_ascii_case(input)),
+        ValidationKind::List => {
+            let items = list_items(original, sheet, at, dv);
+            let listed = |t: &str| items.iter().any(|x| x.eq_ignore_ascii_case(t));
+            if dv.multiple {
+                // Every chosen item must be on the list (Google Sheets' multiple selections).
+                let chosen = split_selections(input);
+                !chosen.is_empty() && chosen.iter().all(|t| listed(t))
+            } else {
+                listed(input)
+            }
+        }
         ValidationKind::Custom => eval(&dv.f1).to_bool().unwrap_or(false),
         ValidationKind::TextLength => {
             let n = input.chars().count() as f64;

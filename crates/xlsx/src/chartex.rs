@@ -141,6 +141,7 @@ pub fn read_chartex(root: &El) -> Option<Chart> {
         by_rows: false,
         pivot: None,
         point_colors: Vec::new(),
+        value_axis: Default::default(),
     })
 }
 

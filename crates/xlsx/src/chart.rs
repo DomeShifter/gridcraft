@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 
 use gridcraft_core::{RangeRef, Value, category_levels};
 use gridcraft_formula::{Expr, SheetSel};
-use gridcraft_model::{Chart, ChartKind, Color, DefinedName, LegendPos, LineDash, Series, Trendline, TrendlineKind, Workbook};
+use gridcraft_model::{AxisBounds, Chart, ChartKind, Color, DefinedName, LegendPos, LineDash, Series, Trendline, TrendlineKind, Workbook};
 
 use crate::drawing::{dml_color, srgb};
 use crate::xml::{El, esc, num};
@@ -218,6 +218,12 @@ fn axis_ids(g: &El) -> Vec<String> {
     g.kids("axId").filter_map(|a| a.attr("val")).map(str::to_string).collect()
 }
 
+/// A value axis's fixed bounds (`c:scaling/c:min`, `c:max`).
+fn read_bounds(ax: &El) -> AxisBounds {
+    let val = |n: &str| ax.path(&["scaling", n]).and_then(|e| e.attr("val")).and_then(|v| v.trim().parse::<f64>().ok());
+    AxisBounds::clean(val("min"), val("max"))
+}
+
 pub fn read_chart(root: &El) -> Option<Chart> {
     let chart = root.child("chart")?;
     let plot = chart.child("plotArea")?;
@@ -301,6 +307,7 @@ pub fn read_chart(root: &El) -> Option<Chart> {
         by_rows: false,
         pivot: root.path(&["pivotSource", "name"]).map(|n| strip_book(n.text.trim()).to_string()).filter(|n| !n.is_empty()),
         point_colors,
+        value_axis: y_ax.filter(|a| a.name == "valAx").map(read_bounds).unwrap_or_default(),
     })
 }
 
@@ -739,15 +746,30 @@ struct Ax<'a> {
     grid: bool,
     title: Option<&'a str>,
     crosses_max: bool,
+    /// Fixed minimum / maximum (value axes).
+    bounds: AxisBounds,
+}
+
+/// `c:max` and `c:min` inside `c:scaling` (schema order: logBase, orientation, max, min).
+fn bounds_xml(b: AxisBounds) -> String {
+    let mut s = String::new();
+    if let Some(v) = b.max {
+        let _ = write!(s, "<c:max val=\"{}\"/>", num(v));
+    }
+    if let Some(v) = b.min {
+        let _ = write!(s, "<c:min val=\"{}\"/>", num(v));
+    }
+    s
 }
 
 fn axis_xml(a: &Ax<'_>) -> String {
     let mut s = format!(
-        "<c:{0}><c:axId val=\"{1}\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"{2}\"/><c:axPos val=\"{3}\"/>",
+        "<c:{0}><c:axId val=\"{1}\"/><c:scaling><c:orientation val=\"minMax\"/>{4}</c:scaling><c:delete val=\"{2}\"/><c:axPos val=\"{3}\"/>",
         if a.cat { "catAx" } else { "valAx" },
         a.id,
         a.delete as u8,
-        a.pos
+        a.pos,
+        bounds_xml(a.bounds)
     );
     if a.grid {
         s.push_str("<c:majorGridlines/>");
@@ -842,6 +864,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: false,
                 title: ch.x_title.as_deref(),
                 crosses_max: false,
+                bounds: AxisBounds::default(),
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
@@ -852,6 +875,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: ch.gridlines,
                 title: ch.y_title.as_deref(),
                 crosses_max: false,
+                bounds: ch.value_axis,
             }));
         }
         G::Bar { bar: true, .. } => {
@@ -864,6 +888,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: false,
                 title: ch.x_title.as_deref(),
                 crosses_max: false,
+                bounds: AxisBounds::default(),
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
@@ -874,6 +899,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: ch.gridlines,
                 title: ch.y_title.as_deref(),
                 crosses_max: false,
+                bounds: ch.value_axis,
             }));
         }
         _ => {
@@ -886,6 +912,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: false,
                 title: ch.x_title.as_deref(),
                 crosses_max: false,
+                bounds: AxisBounds::default(),
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
@@ -896,12 +923,33 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: ch.gridlines,
                 title: ch.y_title.as_deref(),
                 crosses_max: false,
+                bounds: ch.value_axis,
             }));
         }
     }
     if secondary.is_some() {
-        s.push_str(&axis_xml(&Ax { cat: true, id: 3, cross: 4, pos: "b", delete: true, grid: false, title: None, crosses_max: false }));
-        s.push_str(&axis_xml(&Ax { cat: false, id: 4, cross: 3, pos: "r", delete: false, grid: false, title: None, crosses_max: true }));
+        s.push_str(&axis_xml(&Ax {
+            cat: true,
+            id: 3,
+            cross: 4,
+            pos: "b",
+            delete: true,
+            grid: false,
+            title: None,
+            crosses_max: false,
+            bounds: AxisBounds::default(),
+        }));
+        s.push_str(&axis_xml(&Ax {
+            cat: false,
+            id: 4,
+            cross: 3,
+            pos: "r",
+            delete: false,
+            grid: false,
+            title: None,
+            crosses_max: true,
+            bounds: AxisBounds::default(),
+        }));
     }
     if let Some(t) = &ch.data_table {
         let _ = write!(

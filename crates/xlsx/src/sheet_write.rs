@@ -5,8 +5,8 @@ use std::fmt::Write as _;
 
 use gridcraft_core::{CellError, CellRef, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_model::{
-    Cell, CfOperator, CfRule, CfValueKind, Color, CondFormat, ErrorStyle, FilterCriterion, Formula, LineInfo, NoteBox, NoteCorner, Orientation,
-    PageOrder, Sheet, SparklineKind, Style, Table, TotalsFn, Validation, ValidationKind, Workbook, default_icon_thresholds, icon_count,
+    Cell, CfOperator, CfRule, CfValueKind, Color, CondFormat, DropdownDisplay, ErrorStyle, FilterCriterion, Formula, LineInfo, NoteBox, NoteCorner,
+    Orientation, PageOrder, Sheet, SparklineKind, Style, Table, TotalsFn, Validation, ValidationKind, Workbook, default_icon_thresholds, icon_count,
 };
 
 use crate::drawing::{Obj, image_content_type, image_ext};
@@ -302,7 +302,13 @@ fn write_sheet_extensions(s: &mut String, sheet: &Sheet, prio: &[u32]) {
         .filter(|(_, cf)| !cf.ranges.is_empty() && matches!(cf.rule, CfRule::DataBar { gradient: false, .. }))
         .map(|(i, cf)| (cf, prio.get(i).copied().unwrap_or(1)))
         .collect();
-    if !solid_bars.is_empty() || !sheet.sparklines.is_empty() {
+    let dropdowns: Vec<&Validation> = sheet
+        .validations
+        .iter()
+        .filter(|v| !v.ranges.is_empty() && (v.multiple || v.display != DropdownDisplay::Arrow || !v.item_colors.is_empty()))
+        .collect();
+    let any = !solid_bars.is_empty() || !sheet.sparklines.is_empty() || !dropdowns.is_empty();
+    if any {
         s.push_str("<extLst>");
     }
     if !solid_bars.is_empty() {
@@ -340,7 +346,10 @@ fn write_sheet_extensions(s: &mut String, sheet: &Sheet, prio: &[u32]) {
         }
         s.push_str("</x14:sparklineGroups></ext>");
     }
-    if !solid_bars.is_empty() || !sheet.sparklines.is_empty() {
+    if !dropdowns.is_empty() {
+        s.push_str(&rules::dropdowns_ext(&dropdowns));
+    }
+    if any {
         s.push_str("</extLst>");
     }
 }

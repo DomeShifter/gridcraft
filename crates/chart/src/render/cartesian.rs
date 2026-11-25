@@ -4,7 +4,7 @@ use super::lines::{decimate_area, draw_markers, draw_runs};
 use super::trend::{draw_trend_labels, draw_trendlines, max_backward, max_forward, max_forward_slots, supports_trendline};
 use super::{
     Chart, ChartData, ChartKind, Ctx, Fmt, HAlign, LABEL_SIZE, MAX_CATS, MAX_LABELS, MAX_LINE_PTS, MAX_MARKERS, MIN_BAR_PX, Prim, Rgba, Scale,
-    SeriesData, TEXT, VAlign, WHITE, clean, nice_scale,
+    SeriesData, TEXT, VAlign, WHITE, bounded_scale, clean, nice_scale,
 };
 
 // ---------------------------------------------------------------- cartesian (column/bar/line/area/combo)
@@ -233,7 +233,7 @@ fn series_spans(data: &ChartData, fams: &[Fam], sec: &[bool], ncat: usize) -> Ve
     spans
 }
 
-fn axis_scales(data: &ChartData, fams: &[Fam], sec: &[bool], spans: &[Vec<Option<(f64, f64)>>]) -> Vec<(Scale, Fmt)> {
+fn axis_scales(chart: &Chart, data: &ChartData, fams: &[Fam], sec: &[bool], spans: &[Vec<Option<(f64, f64)>>]) -> Vec<(Scale, Fmt)> {
     // Axis scales.
     let mut axes: Vec<(Scale, Fmt)> = Vec::new();
     for axis in [false, true] {
@@ -255,6 +255,8 @@ fn axis_scales(data: &ChartData, fams: &[Fam], sec: &[bool], spans: &[Vec<Option
             let code = members.first().and_then(|i| data.series.get(*i)).map(|s| s.number_format.as_str()).unwrap_or("General");
             (nice_scale(lo, hi, force_zero), Fmt::new(code))
         };
+        // The chart's fixed bounds belong to its primary value axis.
+        let scale = if axis { scale } else { bounded_scale(scale, chart.value_axis) };
         axes.push((scale, fmt));
         if !axis && sec.iter().all(|s| !s) {
             break;
@@ -299,7 +301,7 @@ pub(super) fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx
 
     let spans = series_spans(data, &fams, &sec, ncat);
 
-    let axes = axis_scales(data, &fams, &sec, &spans);
+    let axes = axis_scales(chart, data, &fams, &sec, &spans);
     let Some((s1, f1)) = axes.first() else { return };
     let y1 = ValAxis { scale: *s1, fmt: f1 };
     let y2 = axes.get(1).map(|(s, f)| ValAxis { scale: *s, fmt: f });
@@ -493,7 +495,7 @@ pub(super) fn scatter(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) 
     }
     let Some((ylo, yhi)) = value_range(all.iter().flatten().flatten().map(|p| p.1)) else { return };
     let xs = nice_scale(xlo, xhi, false);
-    let ys = nice_scale(ylo, yhi, false);
+    let ys = bounded_scale(nice_scale(ylo, yhi, false), chart.value_axis);
     let fx = Fmt::new("General");
     let fy = Fmt::new(data.series.first().map(|s| s.number_format.as_str()).unwrap_or("General"));
     let plot = frame(ctx, area, CatAxis::Numeric(xs, &fx), &ValAxis { scale: ys, fmt: &fy }, None, false, chart.gridlines);
