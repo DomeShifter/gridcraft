@@ -181,5 +181,9 @@ pub(super) fn read_validation(v: &El) -> Option<Validation> {
             _ => ErrorStyle::Stop,
         },
         show_error: v.flag("showErrorMessage", false),
+        // GridCraft's own drop-down settings come from the sheet's extension (sheet_read.rs).
+        multiple: false,
+        display: Default::default(),
+        item_colors: Vec::new(),
     })
 }
