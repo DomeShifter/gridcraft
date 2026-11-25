@@ -80,8 +80,11 @@ fn graphic_call(sh: &Sheet, c: CellRef) -> Option<(bool, Vec<Expr>)> {
 pub(crate) fn paint(p: &Painter, wb: &Workbook, si: usize, sh: &Sheet, cells: impl Iterator<Item = (CellRef, Rect)>) {
     for (c, rect) in cells {
         let Some((spark, args)) = graphic_call(sh, c) else { continue };
-        if !matches!(sh.value(c), Value::Text(ref t) if t.is_empty()) {
-            continue; // an error shows as the error
+        // The function's empty result (calc may keep it as empty text or as nothing); an error
+        // shows as the error.
+        let v = sh.value(c);
+        if !(v.is_empty() || matches!(&v, Value::Text(t) if t.is_empty())) {
+            continue;
         }
         let eval = |i: usize| args.get(i).map(|e| gridcraft_engine::calc::recalc::evaluate_expr(wb, si, c, e));
         if spark {
