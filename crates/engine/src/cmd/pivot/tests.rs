@@ -660,6 +660,9 @@ fn fields_move_remove_sort() {
     assert_eq!(f["fields"][0]["name"], "Region");
     assert_eq!(f["fields"][0]["samples"], json!(["East", "North", "West"]));
     assert_eq!(f["fields"][0]["areas"], json!(["rows"]));
+    assert_eq!(f["fields"][0]["items"], json!([]), "items only when asked");
+    let all = s.execute("pivot.fields", json!({"items": true})).unwrap();
+    assert_eq!(all["fields"][0]["items"], json!(["East", "North", "West"]));
     assert_eq!(f["fields"][4]["numeric"], true);
     assert_eq!(f["fields"][2]["date"], true);
     s.execute("pivot.sort", json!({"field": "Region", "order": "desc"})).unwrap();

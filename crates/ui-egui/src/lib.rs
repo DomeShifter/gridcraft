@@ -310,6 +310,9 @@ pub struct SheetApp {
     pub ui: UiState,
     /// The window chrome to draw (see [`Chrome`]).
     pub chrome: Chrome,
+    /// Whether the PivotTable Fields pane shows beside a pivot report. A host with its own pivot
+    /// editor turns it off (StarSheets 0103); every `pivot.*` command stays available.
+    pub pivot_pane: bool,
     /// Scroll position per (window id, sheet uid): each sheet keeps its own when sheets are
     /// inserted, deleted or moved.
     pub views: HashMap<(u64, u64), SheetView>,

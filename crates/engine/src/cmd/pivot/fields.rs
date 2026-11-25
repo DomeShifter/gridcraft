@@ -230,6 +230,7 @@ pub(super) fn update(s: &mut Session, p: &Json, f: impl FnOnce(&mut PivotTable, 
 }
 
 pub(super) fn fields(s: &mut Session, p: &Json) -> Result<Json> {
+    let items = p.get("items").and_then(Json::as_bool).unwrap_or(false);
     let (si, pi) = find_pivot(s, p)?;
     let d = s.doc()?;
     let pt = d.wb.sheet(si).and_then(|sh| sh.pivots.get(pi)).ok_or_else(|| other("There's no such PivotTable."))?;
@@ -259,6 +260,8 @@ pub(super) fn fields(s: &mut Session, p: &Json) -> Result<Json> {
                     "numeric": src.numeric.get(c).copied().unwrap_or(false),
                     "date": src.dates.get(c).copied().unwrap_or(false),
                     "samples": pv::distinct_labels(&d.wb, src, c, PivotDateGroup::None, 5),
+                    // Every item (up to 1000) when asked: a host's filter list (StarSheets 0103).
+                    "items": if items { pv::distinct_labels(&d.wb, src, c, PivotDateGroup::None, 1000) } else { Vec::new() },
                     "areas": areas,
                 })
             })

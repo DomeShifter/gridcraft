@@ -78,7 +78,7 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             insert_pivot_chart
         ),
-        cmd!(query "pivot.fields", "PivotTable Fields", [], None, "{pivot?} → source fields (name, numeric, date, samples, areas) and the current layout", has_doc, fields),
+        cmd!(query "pivot.fields", "PivotTable Fields", [], None, "{pivot?, items?: bool} → source fields (name, numeric, date, samples, items when asked, areas) and the current layout", has_doc, fields),
         cmd!(query "pivot.fieldList", "Field List", ["PivotTable Analyze", "Show"], None, "{pivot?} (same as pivot.fields)", has_doc, fields),
         cmd!(query "pivot.list", "PivotTables", [], None, "{} → every PivotTable in the workbook", has_doc, list),
         cmd!(

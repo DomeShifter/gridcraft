@@ -32,6 +32,7 @@ impl SheetApp {
             session,
             ui: UiState::default(),
             chrome: Chrome::default(),
+            pivot_pane: true,
             views: HashMap::new(),
             editor: None,
             text_box_editor: None,
@@ -247,7 +248,9 @@ impl SheetApp {
                 }
                 tabs::sheet_tabs(self, ui);
             }
-            pivot_pane::show(self, ui);
+            if self.pivot_pane {
+                pivot_pane::show(self, ui);
+            }
             panes::show(self, ui);
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.grid_bg)).show(ui, |ui| {
                 let g0 = now_ms();
