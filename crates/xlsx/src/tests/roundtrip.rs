@@ -431,6 +431,7 @@ fn sample() -> Workbook {
         by_rows: false,
         pivot: None,
         point_colors: Vec::new(),
+        value_axis: Default::default(),
     };
     for kind in [
         ChartKind::ColumnClustered,

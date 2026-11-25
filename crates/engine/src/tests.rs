@@ -6765,3 +6765,62 @@ fn delete_on_empty_cells_is_not_an_undo_step() {
     s.execute("edit.clearContents", json!({"range": "A1"})).unwrap();
     assert_eq!(s.doc().unwrap().undo.len(), steps + 1);
 }
+
+#[test]
+fn multiple_selection_dropdowns_take_several_listed_items() {
+    let mut s = s();
+    let params = json!({
+        "range": "A1:A5",
+        "type": "list",
+        "formula1": "Red,Green,Blue",
+        "multiple": true,
+        "display": "chip",
+        "itemColors": [{"item": "Red", "color": "#F4CCCC"}, {"item": "Blue", "color": "#C9DAF8"}]
+    });
+    s.execute("data.validation", params).unwrap();
+    let dv = s.doc().unwrap().wb.active().unwrap().validations[0].clone();
+    assert!(dv.multiple);
+    assert_eq!(dv.display, gridcraft_model::DropdownDisplay::Chip);
+    assert_eq!(dv.item_color("red"), Some(gridcraft_model::Color::Rgb(0xF4CCCC)));
+    assert_eq!(dv.item_color("Green"), None);
+    let ok = |s: &mut Session, input: &str| s.execute("data.validate", json!({"cell": "A2", "input": input})).unwrap()["ok"] == true;
+    assert!(ok(&mut s, "Red"));
+    assert!(ok(&mut s, "Red, Blue"));
+    assert!(ok(&mut s, "blue,green"));
+    assert!(!ok(&mut s, "Red, Purple"));
+    assert!(!ok(&mut s, ","));
+    // A rule without multiple selections takes one item only.
+    s.execute("data.validation", json!({"range": "B1", "type": "list", "formula1": "Red,Green"})).unwrap();
+    let one = s.execute("data.validate", json!({"cell": "B1", "input": "Red, Green"})).unwrap();
+    assert_eq!(one["ok"], false);
+    let dv = s.doc().unwrap().wb.active().unwrap().validations[1].clone();
+    assert!(!dv.multiple);
+    assert_eq!(dv.display, gridcraft_model::DropdownDisplay::Arrow);
+    // Bad settings are refused.
+    assert!(s.execute("data.validation", json!({"range": "C1", "type": "list", "formula1": "a", "display": "pills"})).is_err());
+    let bad_colour = json!({"range": "C1", "type": "list", "formula1": "a", "itemColors": [{"item": "a", "color": "nope"}]});
+    assert!(s.execute("data.validation", bad_colour).is_err());
+}
+
+#[test]
+fn selections_split_and_join_as_google_sheets_writes_them() {
+    assert_eq!(gridcraft_model::split_selections(" a ,b,, c "), vec!["a", "b", "c"]);
+    assert_eq!(gridcraft_model::join_selections(&["a", "b"]), "a, b");
+    assert!(gridcraft_model::split_selections("").is_empty());
+}
+
+#[test]
+fn chart_value_axis_bounds_are_set_cleared_and_checked() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["x", "y"], ["a", 1], ["b", 5]]})).unwrap();
+    s.execute("insert.chart", json!({"range": "A1:B3", "type": "column"})).unwrap();
+    let bounds = |s: &Session| s.doc().unwrap().wb.active().unwrap().charts[0].value_axis;
+    s.execute("chart.set", json!({"axisMin": 0, "axisMax": 10})).unwrap();
+    assert_eq!(bounds(&s), gridcraft_model::AxisBounds { min: Some(0.0), max: Some(10.0) });
+    s.execute("chart.set", json!({"axisMin": null})).unwrap();
+    assert_eq!(bounds(&s), gridcraft_model::AxisBounds { min: None, max: Some(10.0) });
+    assert!(s.execute("chart.set", json!({"axisMin": 20})).is_err(), "a minimum above the maximum");
+    assert!(s.execute("chart.set", json!({"axisMax": "ten"})).is_err());
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(bounds(&s), gridcraft_model::AxisBounds { min: Some(0.0), max: Some(10.0) });
+}

@@ -191,6 +191,36 @@ fn validation_formula(f: &str) -> String {
     esc(&text_to_file(f.strip_prefix('=').unwrap_or(f)))
 }
 
+/// GridCraft's own worksheet extension for drop-down settings Excel has no place for (multiple
+/// selections, display style, chip colours). The `dataValidation` itself stays an ordinary list
+/// rule, as Google Sheets writes it; Excel skips an `ext` whose `uri` it does not know (ECMA-376
+/// Part 1, 18.2.7), so the file opens there as a plain drop-down. Rules are matched on reading by
+/// their `sqref`.
+pub const DROPDOWNS_EXT_URI: &str = "{9A3C7E21-5B4D-4F6A-8E2B-1C0D3F5A7B92}";
+pub const DROPDOWNS_NS: &str = "urn:gridcraft:dropdowns:1";
+
+pub(super) fn dropdowns_ext(rules: &[&Validation]) -> String {
+    let mut s = format!("<ext uri=\"{DROPDOWNS_EXT_URI}\" xmlns:gc=\"{DROPDOWNS_NS}\"><gc:dropdowns>");
+    for v in rules {
+        let _ = write!(s, "<gc:dropdown sqref=\"{}\"", sqref(&v.ranges));
+        if v.multiple {
+            s.push_str(" multiple=\"1\"");
+        }
+        match v.display {
+            DropdownDisplay::Arrow => {}
+            DropdownDisplay::Chip => s.push_str(" display=\"chip\""),
+            DropdownDisplay::Plain => s.push_str(" display=\"plain\""),
+        }
+        s.push('>');
+        for c in &v.item_colors {
+            let _ = write!(s, "<gc:item text=\"{}\" {}/>", esc_attr(&c.item), crate::styles::color_attrs(&c.color));
+        }
+        s.push_str("</gc:dropdown>");
+    }
+    s.push_str("</gc:dropdowns></ext>");
+    s
+}
+
 pub(super) fn validation_xml(v: &Validation) -> String {
     let ty = match v.kind {
         ValidationKind::Any => "none",

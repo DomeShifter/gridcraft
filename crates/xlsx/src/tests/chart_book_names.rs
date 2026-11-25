@@ -86,6 +86,7 @@ fn chart_names_are_written_qualified() {
         by_rows: false,
         pivot: None,
         point_colors: Vec::new(),
+        value_axis: Default::default(),
     });
     wb.sheets = vec![Arc::new(s), Arc::new(Sheet::new("My Data"))];
     wb.names = vec![
@@ -168,6 +169,7 @@ fn chart_names_keep_spaces_around_a_quoted_sheet_name() {
         by_rows: false,
         pivot: None,
         point_colors: Vec::new(),
+        value_axis: Default::default(),
     });
     wb.sheets = vec![Arc::new(s), Arc::new(Sheet::new(" Sales "))];
     wb.names = vec![

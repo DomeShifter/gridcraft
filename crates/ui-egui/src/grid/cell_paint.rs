@@ -37,7 +37,9 @@ pub(super) fn look(wb: &Workbook, si: usize, sh: &Sheet, c: CellRef, cf: &mut Cf
     if let Some(l) = &cfl
         && let Some(st) = &l.style
     {
-        if st.fill.pattern != PatternType::None {
+        // Under chips an item's colour is the chip's, not the cell's: a conditional format that
+        // colours the cell with it (how the colour reaches Excel) is left out here.
+        if st.fill.pattern != PatternType::None && !chip_item_fill(wb, sh, c, st.fill.fg) {
             style.fill = st.fill;
         }
         if st.font.color != Color::Auto {
@@ -315,6 +317,53 @@ pub(super) fn paint_cf_icon(p: &Painter, r: Rect, set: &str, idx: usize) {
     } else {
         p.circle_filled(r.center(), r.width() / 2.0 - 0.5, col);
     }
+}
+
+/// The chip-style drop-down rule of a cell, if it has one.
+pub(super) fn chip_rule(sh: &Sheet, c: CellRef) -> Option<&gridcraft_engine::model::Validation> {
+    use gridcraft_engine::model::{DropdownDisplay, ValidationKind};
+    let dv = sh.validations.iter().find(|d| d.ranges.iter().any(|r| r.contains(c)))?;
+    (dv.kind == ValidationKind::List && dv.display == DropdownDisplay::Chip).then_some(dv)
+}
+
+/// Whether `fill` is one of the item colours of the cell's chip-style drop-down.
+fn chip_item_fill(wb: &Workbook, sh: &Sheet, c: CellRef, fill: Color) -> bool {
+    let Some(dv) = chip_rule(sh, c) else { return false };
+    let rgb = fill.resolve(&wb.theme);
+    rgb.is_some() && dv.item_colors.iter().any(|i| i.color.resolve(&wb.theme) == rgb)
+}
+
+/// Sheets' grey for a chip without a colour of its own.
+pub(super) const CHIP_GREY: Color32 = Color32::from_rgb(0xE8, 0xEA, 0xED);
+
+/// Draws a chip-style drop-down cell's value as rounded pills, one per selected item, in the
+/// items' colours (grey without one), clipped to the cell; `room` is kept free on the right for
+/// the ▾. True when it drew (the cell's text is then not drawn).
+pub(super) fn paint_chips(p: &Painter, wb: &Workbook, dv: &gridcraft_engine::model::Validation, text: &str, rect: Rect, z: f32, room: f32) -> bool {
+    let items: Vec<&str> = if dv.multiple { gridcraft_engine::model::split_selections(text) } else { vec![text.trim()] };
+    if items.iter().all(|t| t.is_empty()) {
+        return false;
+    }
+    let clip = p.with_clip_rect(rect.intersect(p.clip_rect()));
+    let h = (rect.height() - 4.0 * z).clamp(8.0, 20.0 * z);
+    let font = FontId::proportional(10.0 * 96.0 / 72.0 * z);
+    let right = rect.right() - room;
+    let mut x = rect.left() + 3.0 * z;
+    for item in items.iter().take(64) {
+        if x >= right {
+            break;
+        }
+        let fill = dv.item_color(item).and_then(|c| c.resolve(&wb.theme)).map_or(CHIP_GREY, theme::color32);
+        let ink = ink_on(fill);
+        let galley = clip.layout_no_wrap((*item).to_string(), font.clone(), ink);
+        let w = galley.size().x + 16.0 * z;
+        let pill = Rect::from_min_size(pos2(x, rect.center().y - h / 2.0), vec2(w, h));
+        clip.rect_filled(pill, h / 2.0, fill);
+        let at = pos2(pill.left() + 8.0 * z, pill.center().y - galley.size().y / 2.0);
+        clip.galley(at, galley, ink);
+        x = pill.right() + 4.0 * z;
+    }
+    true
 }
 
 /// Black or white, whichever reads on `fill` (the threshold chart labels use).

@@ -99,7 +99,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Chart Properties",
             ["Chart Design"],
             None,
-            "{chart?: id, type?, subtype?, title?, legend?: none|bottom|top|left|right, dataLabels?, gridlines?, dataTable?: bool, dataTableKeys?: bool, dataTableHorizontalBorder?: bool, dataTableVerticalBorder?: bool, dataTableOutline?: bool (data tables: column/bar/line/area and compatible combo charts), quartiles?: exclusive|inclusive, style?, holeSize?, firstSliceAngle?, xTitle?, yTitle?, at?, width?, height?, dx?, dy?}",
+            "{chart?: id, type?, subtype?, title?, legend?: none|bottom|top|left|right, dataLabels?, gridlines?, dataTable?: bool, dataTableKeys?: bool, dataTableHorizontalBorder?: bool, dataTableVerticalBorder?: bool, dataTableOutline?: bool (data tables: column/bar/line/area and compatible combo charts), quartiles?: exclusive|inclusive, style?, holeSize?, firstSliceAngle?, xTitle?, yTitle?, axisMin?: number|null, axisMax?: number|null (value axis bounds; null = automatic), at?, width?, height?, dx?, dy?}",
             has_doc,
             chart_set
         ),
@@ -858,6 +858,7 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
         by_rows,
         pivot: None,
         point_colors: Vec::new(),
+        value_axis: Default::default(),
     };
     Ok((sheet, chart))
 }
@@ -893,9 +894,31 @@ fn chart_set(s: &mut Session, p: &Json) -> Result<Json> {
             _ => Err(bad("quartiles", "expected exclusive or inclusive")),
         })
         .transpose()?;
+    // Value axis bounds: a number fixes that end, null makes it automatic again.
+    let bound = |k: &str| -> Result<Option<Option<f64>>> {
+        match p.get(k) {
+            None => Ok(None),
+            Some(Json::Null) => Ok(Some(None)),
+            Some(v) => match v.as_f64().filter(|x| x.is_finite()) {
+                Some(x) => Ok(Some(Some(x))),
+                None => Err(bad("chart.set", format!("`{k}` is a number or null"))),
+            },
+        }
+    };
+    let (axis_min, axis_max) = (bound("axisMin")?, bound("axisMax")?);
     edit(s, |cx| {
         let sh = cx.sheet_mut(si)?;
         let Some(c) = sh.charts.get_mut(ci) else { return Ok(Json::Null) };
+        if axis_min.is_some() || axis_max.is_some() {
+            let min = axis_min.unwrap_or(c.value_axis.min);
+            let max = axis_max.unwrap_or(c.value_axis.max);
+            if let (Some(a), Some(b)) = (min, max)
+                && b <= a
+            {
+                return Err(bad("chart.set", "the axis maximum must be above its minimum"));
+            }
+            c.value_axis = gridcraft_model::AxisBounds { min, max };
+        }
         if let Some(t) = str_param(p, "type") {
             c.kind = chart_kind(t, str_param(p, "subtype").unwrap_or(""));
             if !c.supports_data_table() {

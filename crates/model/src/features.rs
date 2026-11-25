@@ -314,6 +314,60 @@ pub struct Validation {
     pub error_message: String,
     pub error_style: ErrorStyle,
     pub show_error: bool,
+    /// A list rule takes several of its items at once (Google Sheets' "Allow multiple
+    /// selections"): the cell holds them joined by `", "`, as Google writes them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub multiple: bool,
+    /// How a list rule's cells look.
+    #[serde(default, skip_serializing_if = "is_default_display")]
+    pub display: DropdownDisplay,
+    /// List items with a chip colour, by the item's text.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub item_colors: Vec<ItemColor>,
+}
+
+/// How a drop-down cell looks (Google Sheets' "Display style").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DropdownDisplay {
+    /// The value as text with a ▾ (Excel's look; files without the setting).
+    #[default]
+    Arrow,
+    /// Each value as a rounded coloured pill.
+    Chip,
+    /// The value as plain text, no ▾.
+    Plain,
+}
+
+fn is_default_display(d: &DropdownDisplay) -> bool {
+    *d == DropdownDisplay::Arrow
+}
+
+/// A list item's chip colour.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ItemColor {
+    pub item: String,
+    pub color: Color,
+}
+
+/// Longest list of item colours a rule keeps (from a file or a command).
+pub const MAX_ITEM_COLORS: usize = 1000;
+
+/// What a multiple-selection cell holds: its items, split on commas and trimmed, empty ones left
+/// out (Google Sheets' format, `"a, b"`).
+pub fn split_selections(text: &str) -> Vec<&str> {
+    text.split(',').map(str::trim).filter(|t| !t.is_empty()).collect()
+}
+
+/// The cell text for a set of selected items (`"a, b"`).
+pub fn join_selections<S: AsRef<str>>(items: &[S]) -> String {
+    items.iter().map(AsRef::as_ref).collect::<Vec<_>>().join(", ")
+}
+
+impl Validation {
+    /// The chip colour of a list item (compared without case, as the list check does).
+    pub fn item_color(&self, item: &str) -> Option<Color> {
+        self.item_colors.iter().find(|c| c.item.eq_ignore_ascii_case(item)).map(|c| c.color)
+    }
 }
 
 impl Default for Validation {
@@ -333,6 +387,9 @@ impl Default for Validation {
             error_message: String::new(),
             error_style: ErrorStyle::Stop,
             show_error: true,
+            multiple: false,
+            display: DropdownDisplay::Arrow,
+            item_colors: Vec::new(),
         }
     }
 }
@@ -619,6 +676,35 @@ pub struct Chart {
     /// the palette's (`c:dPt` in the file).
     #[serde(default)]
     pub point_colors: Vec<Option<Color>>,
+    /// Fixed ends of the value axis (Sheets' Customise › Vertical axis, Excel's Bounds); `None`
+    /// is automatic. Scatter and bubble charts: the vertical (Y) axis.
+    #[serde(default, skip_serializing_if = "AxisBounds::is_auto")]
+    pub value_axis: AxisBounds,
+}
+
+/// Fixed minimum and maximum of a value axis (`c:scaling/c:min`, `c:max`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AxisBounds {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+}
+
+impl AxisBounds {
+    pub fn is_auto(&self) -> bool {
+        self.min.is_none() && self.max.is_none()
+    }
+
+    /// Bounds as kept: finite values only, and a maximum above the minimum (else both dropped).
+    pub fn clean(min: Option<f64>, max: Option<f64>) -> AxisBounds {
+        let min = min.filter(|v| v.is_finite());
+        let max = max.filter(|v| v.is_finite());
+        match (min, max) {
+            (Some(a), Some(b)) if b <= a => AxisBounds::default(),
+            _ => AxisBounds { min, max },
+        }
+    }
 }
 
 impl Chart {
@@ -1154,6 +1240,7 @@ mod tests {
             by_rows: false,
             pivot: None,
             point_colors: Vec::new(),
+            value_axis: Default::default(),
         };
         let mut json = serde_json::to_value(&chart).expect("serialize chart");
         json.as_object_mut().expect("chart object").remove("hole_size");

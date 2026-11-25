@@ -950,6 +950,7 @@ mod tests {
                 by_rows: false,
                 pivot: None,
                 point_colors: Vec::new(),
+                value_axis: Default::default(),
             }),
             ObjKind::Image => s.images.push(Image { id, anchor, data: Arc::new(vec![]), mime: String::new(), alt: String::new() }),
             ObjKind::Shape | ObjKind::Equation => s.shapes.push(Shape {

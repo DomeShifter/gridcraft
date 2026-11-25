@@ -52,6 +52,7 @@ fn workbook(categories: &str, values: &str) -> Workbook {
         by_rows: false,
         pivot: None,
         point_colors: Vec::new(),
+        value_axis: Default::default(),
     });
     Workbook { sheets: vec![Arc::new(s)], ..Workbook::default() }
 }

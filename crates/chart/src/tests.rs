@@ -57,6 +57,7 @@ fn chart(kind: ChartKind) -> Chart {
         by_rows: false,
         pivot: None,
         point_colors: Vec::new(),
+        value_axis: Default::default(),
     }
 }
 
@@ -1701,4 +1702,37 @@ fn a_series_named_by_a_name_on_a_sheet_with_a_bang_resolves() {
     }];
     let d = resolve(&wb, 0, &c);
     assert_eq!(d.series.first().map(|s| s.name.as_str()), Some("Takings"));
+}
+
+#[test]
+fn fixed_axis_bounds_replace_the_automatic_ends() {
+    use gridcraft_model::AxisBounds;
+    let auto = nice_scale(0.0, 61870.0, true);
+    assert_eq!(bounded_scale(auto, AxisBounds::default()), auto);
+    let s = bounded_scale(auto, AxisBounds { min: Some(10000.0), max: Some(50000.0) });
+    assert_eq!((s.min, s.max, s.step), (10000.0, 50000.0, 5000.0));
+    assert_eq!(s.ticks().first(), Some(&10000.0));
+    assert_eq!(s.ticks().last(), Some(&50000.0));
+    // One end fixed, the other automatic.
+    let s = bounded_scale(auto, AxisBounds { min: None, max: Some(30000.0) });
+    assert_eq!((s.min, s.max), (0.0, 30000.0));
+    // Ends that are not a whole number of steps apart: no tick past the maximum.
+    let s = bounded_scale(auto, AxisBounds { min: Some(0.0), max: Some(7.5) });
+    assert!(s.ticks().iter().all(|t| *t <= 7.5), "{:?}", s.ticks());
+    // A minimum at or above the automatic maximum leaves nothing to plot: ignored.
+    assert_eq!(bounded_scale(auto, AxisBounds { min: Some(90000.0), max: None }), auto);
+    // Values past the ends stay at the ends.
+    let s = bounded_scale(auto, AxisBounds { min: Some(0.0), max: Some(10.0) });
+    assert_eq!((s.frac(20.0), s.frac(-5.0)), (1.0, 0.0));
+}
+
+#[test]
+fn a_column_chart_draws_inside_fixed_bounds() {
+    let mut c = chart(ChartKind::ColumnClustered);
+    c.value_axis = gridcraft_model::AxisBounds { min: Some(10000.0), max: Some(30000.0) };
+    let prims = render(&c, &sample(ChartKind::ColumnClustered), 640.0, 400.0, &ApproxMeasure);
+    assert_sane(&prims, 640.0, 400.0);
+    let labels = texts(&prims);
+    assert!(labels.contains(&"$30,000") && labels.contains(&"$10,000"), "{labels:?}");
+    assert!(!labels.contains(&"$70,000"), "{labels:?}");
 }

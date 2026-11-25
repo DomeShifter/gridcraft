@@ -134,7 +134,8 @@ pub fn validation_arrow(sh: &Sheet, geo: &Geo, c: CellRef) -> Option<Rect> {
 /// Sheets' ▾ inside the right edge of any drop-down cell (drawn by the quadrant painter): its click area.
 pub fn sheets_dropdown_hit(sh: &Sheet, geo: &Geo, c: CellRef) -> Option<Rect> {
     let dv = sh.validations.iter().find(|d| d.ranges.iter().any(|r| r.contains(c)))?;
-    if dv.kind != gridcraft_engine::model::ValidationKind::List || !dv.in_cell_dropdown || geo.hidden_under_frozen(sh, c) {
+    let plain = dv.display == gridcraft_engine::model::DropdownDisplay::Plain;
+    if dv.kind != gridcraft_engine::model::ValidationKind::List || !dv.in_cell_dropdown || plain || geo.hidden_under_frozen(sh, c) {
         return None;
     }
     let r = geo.cell_rect(sh, c);
@@ -167,6 +168,10 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
         return;
     };
     let items = gridcraft_engine::cmd::data::list_items(&wb, si, c, &dv);
+    // Multiple selections (Sheets): each row is a tick box; the cell holds the ticked items.
+    let current = sh.input_text(c);
+    let picked: Vec<&str> = if dv.multiple { gridcraft_engine::model::split_selections(&current) } else { Vec::new() };
+    let is_picked = |it: &str| picked.iter().any(|p| p.eq_ignore_ascii_case(it));
     let r = geo.cell_rect(sh, c);
     let screen = ui.ctx().content_rect();
     // A host's menu look (StarSheets): every choice shown, as tall as the window allows below
@@ -219,6 +224,11 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
                 for (k, it) in items.iter().enumerate() {
                     let on = key == Some(k);
                     let row = match look {
+                        _ if dv.multiple => {
+                            let mut ticked = is_picked(it.as_str());
+                            let h = if look.is_some() { 32.0 } else { LIST_PICKER_ROW_H };
+                            ui.add_sized([width, h], egui::Checkbox::new(&mut ticked, it.as_str()))
+                        }
                         Some(l) => ui.add_sized([width, 32.0], (l.list_row)(it.as_str()).selected(on)),
                         None => ui.add(egui::Button::new(it.as_str()).frame_when_inactive(false).selected(on).min_size(vec2(width, LIST_PICKER_ROW_H))),
                     };
@@ -240,6 +250,14 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
         });
     });
     match chosen {
+        // Multiple selections: a pick ticks or unticks the item and the list stays open; the
+        // ticked items are kept in the list's order.
+        Some(k) if k < items.len() && dv.multiple => {
+            let flip = items[k].as_str();
+            let ticked = |it: &&str| it.eq_ignore_ascii_case(flip) != is_picked(*it);
+            let now: Vec<&str> = items.iter().map(String::as_str).filter(ticked).collect();
+            app.run_or_alert("cell.set", json!({"cell": c.a1(), "input": gridcraft_engine::model::join_selections(&now)}));
+        }
         Some(k) if k < items.len() => {
             app.run_or_alert("cell.set", json!({"cell": c.a1(), "input": items[k]}));
             close = true;

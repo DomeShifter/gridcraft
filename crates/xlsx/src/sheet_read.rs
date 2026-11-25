@@ -7,9 +7,9 @@ use gridcraft_core::date::{serial_from_ymd, time_fraction};
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_formula::Expr;
 use gridcraft_model::{
-    AutoFilter, Cell, CfOperator, CfRule, CfValueKind, Comment, CondFormat, EditRange, ErrorStyle, FilterCriterion, Formula, Hyperlink, LineInfo,
-    NoteBox, NoteCorner, Orientation, PageOrder, PasswordHash, Sheet, SheetProtection, Sparkline, SparklineKind, Table, TableColumn, TotalsFn,
-    Validation, ValidationKind, XmlColumnPr,
+    AutoFilter, Cell, CfOperator, CfRule, CfValueKind, Comment, CondFormat, DropdownDisplay, EditRange, ErrorStyle, FilterCriterion, Formula,
+    Hyperlink, ItemColor, LineInfo, MAX_ITEM_COLORS, NoteBox, NoteCorner, Orientation, PageOrder, PasswordHash, Sheet, SheetProtection, Sparkline,
+    SparklineKind, Table, TableColumn, TotalsFn, Validation, ValidationKind, XmlColumnPr,
 };
 
 use crate::IoError;
@@ -867,6 +867,29 @@ fn read_ext(cx: &mut Ctx<'_>, e: &El, sheet: &mut Sheet) {
                             RangeRef::tidy(&mut v.ranges);
                             sheet.validations.push(v);
                         }
+                    }
+                }
+                // GridCraft's drop-down settings (sheet_write/rules.rs `dropdowns_ext`), matched to
+                // the rules read before by their ranges.
+                "dropdowns" => {
+                    for d in c.kids("dropdown") {
+                        let mut ranges = parse_sqref(d.attr("sqref"));
+                        RangeRef::tidy(&mut ranges);
+                        let Some(v) = sheet.validations.iter_mut().find(|v| v.ranges == ranges && v.kind == ValidationKind::List) else { continue };
+                        v.multiple = d.flag("multiple", false);
+                        v.display = match d.attr("display") {
+                            Some("chip") => DropdownDisplay::Chip,
+                            Some("plain") => DropdownDisplay::Plain,
+                            _ => DropdownDisplay::Arrow,
+                        };
+                        v.item_colors = d
+                            .kids("item")
+                            .filter_map(|i| {
+                                let item = i.attr("text")?.trim();
+                                (!item.is_empty()).then(|| ItemColor { item: item.to_string(), color: read_color(i, &cx.palette) })
+                            })
+                            .take(MAX_ITEM_COLORS)
+                            .collect();
                     }
                 }
                 "sparklineGroups" => {

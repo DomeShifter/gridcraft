@@ -1,7 +1,7 @@
 use super::active_row::paint_active_row;
 use super::cell_paint::{
-    Look, MergedArea, cell_text_y, center_across_end, col32, display_text, galley_baseline_bounds, look, merged_edges, paint_border, paint_cf_icon,
-    painted_halign, rotated_text_pos, shrink_font, wrapped_cell_text_y,
+    Look, MergedArea, cell_text_y, center_across_end, chip_rule, col32, display_text, galley_baseline_bounds, look, merged_edges, paint_border,
+    paint_cf_icon, paint_chips, painted_halign, rotated_text_pos, shrink_font, wrapped_cell_text_y,
 };
 use super::geo::Geo;
 use super::tables::{filter_button_rect, paint_filter_button};
@@ -264,6 +264,13 @@ fn paint_cell_decorations(q: &QuadrantPaint<'_>, c: CellRef, rect: Rect, lk: &Lo
     if lk.style.num_fmt.as_str() == "checkbox" && matches!(v, Value::Bool(_) | Value::Empty) {
         paint_checkbox(p, rect, z, v == Value::Bool(true));
         return true;
+    }
+    if !q.sheet.show_formulas
+        && !v.is_empty()
+        && let Some(dv) = chip_rule(q.sheet, c)
+    {
+        let room = if dv.in_cell_dropdown { 20.0 } else { 0.0 };
+        return paint_chips(p, q.workbook, dv, &v.display(), rect, z, room);
     }
     false
 }
@@ -621,7 +628,11 @@ fn paint_borders(q: &mut QuadrantPaint<'_>, looks: &[(CellRef, Rect, Look, Optio
             && !sh.show_formulas
             && let Some(dv) = sh.validations.iter().find(|d| d.ranges.iter().any(|r| r.contains(*c)))
         {
-            if dv.kind == gridcraft_engine::model::ValidationKind::List && dv.in_cell_dropdown {
+            // Plain text shows no ▾ (Sheets' "Plain text" display style).
+            if dv.kind == gridcraft_engine::model::ValidationKind::List
+                && dv.in_cell_dropdown
+                && dv.display != gridcraft_engine::model::DropdownDisplay::Plain
+            {
                 let s = (rect.height() - 4.0).clamp(10.0, 16.0);
                 let r = egui::Rect::from_center_size(pos2(rect.right() - s / 2.0 - 3.0, rect.center().y), egui::vec2(s, s));
                 crate::icons::paint_on_sheet(p, r, crate::icons::Icon::Chevron, Color32::from_rgb(0x5F, 0x63, 0x68));

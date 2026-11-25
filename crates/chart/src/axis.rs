@@ -21,7 +21,9 @@ impl Scale {
         if !(span.is_finite() && self.step.is_finite() && self.step > 0.0 && span > 0.0) {
             return vec![self.min];
         }
-        let n = ((span / self.step).round() as i64).clamp(1, 50);
+        // Whole steps only: fixed bounds (`bounded`) need not be a multiple of the step apart,
+        // and a tick past `max` would sit outside the plot.
+        let n = ((span / self.step + 1e-6).floor() as i64).clamp(1, 50);
         (0..=n)
             .map(|i| {
                 let v = self.min + i as f64 * self.step;
@@ -33,13 +35,14 @@ impl Scale {
             })
             .collect()
     }
-    /// Position of `v` along the axis, 0 at `min`, 1 at `max` (clamped to a sane band).
+    /// Position of `v` along the axis, 0 at `min`, 1 at `max`; values past either end stay at
+    /// that end (fixed bounds can cut the data, as in Excel).
     pub fn frac(&self, v: f64) -> f32 {
         let span = self.max - self.min;
         if !(span.is_finite() && span > 0.0 && v.is_finite()) {
             return 0.0;
         }
-        (((v - self.min) / span).clamp(-0.5, 1.5)) as f32
+        (((v - self.min) / span).clamp(0.0, 1.0)) as f32
     }
 }
 
@@ -106,6 +109,28 @@ pub fn nice_scale(lo: f64, hi: f64, force_zero: bool) -> Scale {
     if !(min.is_finite() && max.is_finite()) || max <= min {
         return Scale { min: lo, max: hi, step: range };
     }
+    Scale { min, max, step }
+}
+
+/// `auto` with the fixed ends a chart sets (Sheets' Customise › Vertical axis Min / Max, Excel's
+/// Bounds); an end left automatic keeps `auto`'s. Bounds that leave nothing to plot are ignored.
+pub fn bounded_scale(auto: Scale, b: gridcraft_model::AxisBounds) -> Scale {
+    if b.is_auto() {
+        return auto;
+    }
+    let min = b.min.map_or(auto.min, clean);
+    let max = b.max.map_or(auto.max, clean);
+    let range = max - min;
+    if !(range.is_finite() && range > 0.0) {
+        return auto;
+    }
+    // Steps of 1, 2 or 5 × 10ⁿ, at most 8 of them, as `nice_scale` picks.
+    let e = (range / 8.0).log10().floor();
+    let step = [e, e + 1.0]
+        .into_iter()
+        .flat_map(|k| [1.0, 2.0, 5.0].map(|m| m * 10f64.powf(k)))
+        .find(|s| s.is_finite() && *s > 0.0 && range / s <= 8.0 + 1e-9)
+        .unwrap_or(range);
     Scale { min, max, step }
 }
 

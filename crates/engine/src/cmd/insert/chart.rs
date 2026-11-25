@@ -269,6 +269,7 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
         by_rows,
         pivot: None,
         point_colors: Vec::new(),
+        value_axis: Default::default(),
     };
     Ok((sheet, chart))
 }
