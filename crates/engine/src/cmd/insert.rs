@@ -215,7 +215,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Manage Rules…",
             ["Home", "Styles", "Conditional Formatting"],
             None,
-            "{delete?: index, moveUp?: index, moveDown?: index, set?: index, cf?: a rule as the model stores it (with set: put it back in place of rule `index` exactly, e.g. to cancel a preview)}",
+            "{delete?: index, moveUp?: index, moveDown?: index, set?: index, cf?: a rule as the model stores it (with set: put it back in place of rule `index` exactly, e.g. to cancel a preview), all?: [rules as the model stores them] (the sheet's whole list, in priority order, as one undo step)}",
             has_doc,
             manage_cf
         ),
@@ -1842,7 +1842,7 @@ fn rebase_cf_formulas(rule: &mut CfRule, from: CellRef, to: CellRef) {
 
 fn manage_cf(s: &mut Session, p: &Json) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
-    if p.get("delete").is_none() && p.get("moveUp").is_none() && p.get("moveDown").is_none() && p.get("set").is_none() {
+    if p.get("delete").is_none() && p.get("moveUp").is_none() && p.get("moveDown").is_none() && p.get("set").is_none() && p.get("all").is_none() {
         let list: Vec<Json> = s
             .doc()?
             .wb
@@ -1861,8 +1861,20 @@ fn manage_cf(s: &mut Session, p: &Json) -> Result<Json> {
     if let Some((_, cf)) = &set {
         check_cf_rule(&cf.rule)?;
     }
+    // StarSheets 0098: the whole list at once, so a host's change to several rules (Alternating
+    // colours: header, two bands, footer) is one undo step.
+    let all = match p.get("all") {
+        Some(v) => Some(serde_json::from_value::<Vec<CondFormat>>(v.clone()).map_err(|e| bad("home.manageRules", e.to_string()))?),
+        None => None,
+    };
+    for cf in all.iter().flatten() {
+        check_cf_rule(&cf.rule)?;
+    }
     edit(s, |cx| {
         let sh = cx.sheet_mut(sheet)?;
+        if let Some(all) = all {
+            sh.cond_formats = all;
+        }
         if let Some((i, cf)) = set {
             let slot = sh.cond_formats.get_mut(i).ok_or_else(|| bad("home.manageRules", "no such rule"))?;
             *slot = cf;
@@ -2033,6 +2045,28 @@ mod tests {
         s.execute("home.manageRules", json!({"delete": 0, "moveDown": 0})).unwrap();
         let rules = s.execute("home.manageRules", json!({})).unwrap();
         assert_eq!(rules["rules"].as_array().map(Vec::len), Some(0));
+    }
+
+    #[test]
+    fn manage_rules_sets_the_whole_list_in_one_undo_step() {
+        // StarSheets 0098.
+        let mut s = Session::new();
+        s.new_workbook();
+        let rule = json!({"type": "expression", "formula": "=ISEVEN(ROW())", "style": {"fill": "#E8F0FE"}});
+        s.execute("home.conditionalFormat", json!({"range": "A1:B4", "rule": rule})).unwrap();
+        let before = s.doc().unwrap().wb.active().unwrap().cond_formats.clone();
+        let mut two = before.clone();
+        two.push(before[0].clone());
+        let undo = s.doc().unwrap().undo.len();
+        s.execute("home.manageRules", json!({"all": serde_json::to_value(&two).unwrap()})).unwrap();
+        let now = s.doc().unwrap().wb.active().unwrap().cond_formats.clone();
+        assert_eq!(now.len(), 2);
+        assert_eq!((now[0].priority, now[1].priority), (1, 2));
+        assert_eq!(s.doc().unwrap().undo.len(), undo + 1);
+        s.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(s.doc().unwrap().wb.active().unwrap().cond_formats, before);
+        s.execute("home.manageRules", json!({"all": []})).unwrap();
+        assert!(s.doc().unwrap().wb.active().unwrap().cond_formats.is_empty());
     }
 
     #[test]
