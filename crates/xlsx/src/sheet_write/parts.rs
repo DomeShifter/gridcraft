@@ -110,6 +110,26 @@ pub(super) fn autofilter_xml(range: RangeRef, criteria: &[(u32, FilterCriterion)
     s
 }
 
+/// GridCraft's own worksheet extension for filter views (Google Sheets' Data › Filter views), which
+/// Excel has no place for: each view's id, name and an ordinary `autoFilter` (range and criteria,
+/// colour filters as `colorFilter` with a `dxfId`). Excel skips an `ext` whose `uri` it does not
+/// know (ECMA-376 Part 1, 18.2.7), so the file opens there as before. Excel's own custom views
+/// (`customSheetViews`) were not used: they save the whole sheet's state and are refused in
+/// workbooks with tables.
+pub const FILTER_VIEWS_EXT_URI: &str = "{5D7B2E94-3C1A-4E8F-9B06-7A4C2D1E8F35}";
+pub const FILTER_VIEWS_NS: &str = "urn:gridcraft:filterviews:1";
+
+pub(super) fn filter_views_ext(sheet: &Sheet, out: &mut Out) -> String {
+    let mut s = format!("<ext uri=\"{FILTER_VIEWS_EXT_URI}\" xmlns:gc=\"{FILTER_VIEWS_NS}\"><gc:filterViews>");
+    for v in &sheet.filter_views {
+        let _ = write!(s, "<gc:filterView id=\"{}\" name=\"{}\">", v.id, esc_attr(&v.name));
+        s.push_str(&autofilter_xml(v.range, &v.criteria, out));
+        s.push_str("</gc:filterView>");
+    }
+    s.push_str("</gc:filterViews></ext>");
+    s
+}
+
 pub(super) fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, out: &mut Out) -> String {
     let mut s =
         format!("{XML_DECL}<table xmlns=\"{NS_MAIN}\" id=\"{id}\" name=\"{0}\" displayName=\"{0}\" ref=\"{1}\"", esc_attr(name), t.range.a1());

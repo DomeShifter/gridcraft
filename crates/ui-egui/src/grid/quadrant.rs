@@ -703,7 +703,8 @@ fn paint_filter_buttons(q: &QuadrantPaint<'_>, range: RangeRef) {
     let sh = q.sheet;
     // Filter buttons.
     let mut buttons: Vec<(CellRef, bool)> = Vec::new();
-    if let Some(af) = &sh.autofilter {
+    // A filter view shown here takes the place of the sheet's filter.
+    if let Some(af) = &sh.shown_filter() {
         for col in af.range.start.col..=af.range.end.col {
             let active = af.criteria.iter().any(|(o, _)| af.range.start.col + o == col);
             buttons.push((CellRef::new(af.range.start.row, col), active));

@@ -557,3 +557,158 @@ fn a_rule_with_an_unknown_type_operator_or_error_style_is_refused() {
     assert_eq!(sh.validations.len(), 3);
     assert!(check_validation(&s.doc().unwrap().wb, 0, CellRef::parse("A2").unwrap(), "0").is_some());
 }
+
+// ---------------------------------------------------------------- filter views and colours
+
+/// A sheet with a header row and five rows of data: name, team and score.
+fn team_sheet() -> Session {
+    let mut s = Session::new();
+    s.new_workbook();
+    let rows = json!([["name", "team", "score"], ["Ann", "Red", 5], ["Bob", "Blue", 3], ["Cy", "Red", 8], ["Di", "Green", 1], ["Ed", "Blue", 9]]);
+    s.execute("range.setValues", json!({"range": "A1", "values": rows})).unwrap();
+    s
+}
+
+fn show(s: &mut Session, id: Option<u32>) {
+    let d = s.doc_mut().unwrap();
+    assert!(show_filter_view(Arc::make_mut(&mut d.wb), 0, id));
+}
+
+fn shown_hidden(s: &Session) -> Vec<u32> {
+    let sh = s.doc().unwrap().wb.active().unwrap().clone();
+    (0..10).filter(|r| sh.is_row_hidden(*r)).collect()
+}
+
+#[test]
+fn a_filter_view_hides_rows_only_where_it_is_shown() {
+    let mut s = team_sheet();
+    let made = s.execute("data.createFilterView", json!({})).unwrap();
+    assert_eq!(made, json!({"id": 1, "name": "Filter 1", "range": "A1:C6"}));
+    show(&mut s, Some(1));
+    s.execute("data.filterBy", json!({"column": "B", "values": ["Red"], "view": 1})).unwrap();
+    // Shown here: Bob, Di and Ed are hidden.
+    assert_eq!(shown_hidden(&s), vec![2, 4, 5]);
+    let sh = s.doc().unwrap().wb.active().unwrap().clone();
+    // The sheet itself (what is saved and sent) hides nothing and has no filter.
+    assert!(sh.rows.values().all(|r| !r.hidden), "{:?}", sh.rows);
+    assert!(sh.autofilter.is_none());
+    let text = serde_json::to_string(&sh).unwrap();
+    assert!(!text.contains("view_rows"), "the shown view is not in JSON");
+    assert!(text.contains("filter_views") && text.contains("Red"), "the view itself is");
+    let buttons = sh.shown_filter().unwrap();
+    assert_eq!((buttons.range.a1(), buttons.criteria.len()), ("A1:C6".to_string(), 1));
+    assert!(sh.has_filter_button(CellRef::parse("C1").unwrap()));
+    assert!(!sh.has_filter_button(CellRef::parse("C2").unwrap()));
+    assert_eq!(filter_values(&s.doc().unwrap().wb, 0, 1).iter().filter(|(_, on)| *on).count(), 1, "the menu lists the view's choice");
+    // Closing it shows every row; the view keeps its filter for next time.
+    show(&mut s, None);
+    assert!(shown_hidden(&s).is_empty());
+    show(&mut s, Some(1));
+    assert_eq!(shown_hidden(&s), vec![2, 4, 5]);
+    // Another tab, which doesn't show the view, sees every row after the same commands.
+    let mut other = team_sheet();
+    other.execute("data.createFilterView", json!({})).unwrap();
+    other.execute("data.filterBy", json!({"column": "B", "values": ["Red"], "view": 1})).unwrap();
+    assert!(shown_hidden(&other).is_empty());
+    // Undo takes the view's filter off again.
+    s.execute("edit.undo", json!({})).unwrap();
+    show(&mut s, Some(1));
+    assert!(shown_hidden(&s).is_empty());
+}
+
+#[test]
+fn a_filter_view_replaces_the_sheet_filter_but_keeps_rows_hidden_by_hand() {
+    let mut s = team_sheet();
+    s.execute("data.filter", json!({"range": "A1:C6"})).unwrap();
+    s.execute("data.filterBy", json!({"column": "B", "values": ["Blue"]})).unwrap();
+    assert_eq!(shown_hidden(&s), vec![1, 3, 4]);
+    // Save as filter view: the sheet's filter becomes a view of its own.
+    let made = s.execute("data.createFilterView", json!({"fromFilter": true})).unwrap();
+    assert_eq!(made["range"], json!("A1:C6"));
+    s.execute("data.filterBy", json!({"column": "C", "custom": {"op": ">", "value": "4"}, "view": 1})).unwrap();
+    show(&mut s, Some(1));
+    // Blue and more than 4: only Ed.
+    assert_eq!(shown_hidden(&s), vec![1, 2, 3, 4]);
+    s.execute("data.filterBy", json!({"column": "B", "clear": true, "view": 1})).unwrap();
+    // Rows the sheet's filter hides show again in the view.
+    assert_eq!(shown_hidden(&s), vec![2, 4]);
+    // A row hidden by hand stays hidden.
+    show(&mut s, None);
+    {
+        let d = s.doc_mut().unwrap();
+        let sh = Arc::make_mut(&mut d.wb).sheet_mut(0).unwrap();
+        sh.autofilter = None;
+        for r in sh.rows.values_mut() {
+            r.hidden = false;
+        }
+        sh.rows.entry(1).or_default().hidden = true;
+    }
+    show(&mut s, Some(1));
+    assert_eq!(shown_hidden(&s), vec![1, 2, 4]);
+    let sh = s.doc().unwrap().wb.active().unwrap().clone();
+    assert!(!sh.rows.get(&4).is_some_and(|r| r.hidden), "the view's hiding stays out of the sheet's rows");
+}
+
+#[test]
+fn filter_views_are_named_renamed_duplicated_moved_and_deleted() {
+    let mut s = team_sheet();
+    assert_eq!(s.execute("data.createFilterView", json!({})).unwrap()["name"], json!("Filter 1"));
+    assert_eq!(s.execute("data.createFilterView", json!({"name": "  Reds "})).unwrap()["name"], json!("Reds"));
+    assert_eq!(s.execute("data.createFilterView", json!({})).unwrap()["name"], json!("Filter 2"));
+    s.execute("data.filterBy", json!({"column": "B", "values": ["Red"], "view": 2})).unwrap();
+    let copy = s.execute("data.createFilterView", json!({"copyOf": 2})).unwrap();
+    assert_eq!((copy["id"].clone(), copy["name"].clone()), (json!(4), json!("Reds copy")));
+    s.execute("data.updateFilterView", json!({"view": 1, "name": "Everyone", "range": "A1:B6"})).unwrap();
+    s.execute("data.deleteFilterView", json!({"view": 3})).unwrap();
+    let sh = s.doc().unwrap().wb.active().unwrap().clone();
+    let names: Vec<(u32, &str, String)> = sh.filter_views.iter().map(|v| (v.id, v.name.as_str(), v.range.a1())).collect();
+    assert_eq!(names, vec![(1, "Everyone", "A1:B6".into()), (2, "Reds", "A1:C6".into()), (4, "Reds copy", "A1:C6".into())]);
+    assert_eq!(sh.filter_views[2].criteria, sh.filter_views[1].criteria);
+    // Inserting rows above moves the views with their data.
+    s.execute("home.insertRows", json!({"rows": "1:2"})).unwrap();
+    let sh = s.doc().unwrap().wb.active().unwrap().clone();
+    assert_eq!(sh.filter_views[1].range.a1(), "A3:C8");
+    assert!(s.execute("data.filterBy", json!({"column": "B", "values": ["x"], "view": 9})).is_err(), "an unknown view is an error");
+    assert!(s.execute("data.deleteFilterView", json!({})).is_err());
+}
+
+#[test]
+fn filter_and_sort_by_colour() {
+    let mut s = team_sheet();
+    s.execute("home.fillColor", json!({"range": "A3", "color": "#FF0000"})).unwrap();
+    s.execute("home.fillColor", json!({"range": "A5:A6", "color": "#00FF00"})).unwrap();
+    s.execute("home.fontColor", json!({"range": "A4", "color": "#0000FF"})).unwrap();
+    s.execute("data.filter", json!({"range": "A1:C6"})).unwrap();
+    let colors = s.execute("data.filterColors", json!({"column": "A"})).unwrap();
+    let hexes = |k: &str| colors[k].as_array().unwrap().iter().map(|c| c["hex"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!(hexes("fill"), vec!["#FF0000", "#00FF00"], "no fill is left out");
+    assert_eq!(hexes("text"), vec!["#000000", "#0000FF"], "automatic text shows as black");
+    // Filter by a colour as the list gives it.
+    let green = colors["fill"][1]["color"].clone();
+    let r = s.execute("data.filterBy", json!({"column": "A", "fillColor": green})).unwrap();
+    assert_eq!(r["hiddenRows"], json!(3));
+    assert_eq!(shown_hidden(&s), vec![1, 2, 3]);
+    s.execute("data.filterBy", json!({"column": "A", "textColor": "#0000ff"})).unwrap();
+    assert_eq!(shown_hidden(&s), vec![1, 2, 4, 5]);
+    s.execute("data.filterBy", json!({"column": "A", "clear": true})).unwrap();
+    assert!(s.execute("data.filterBy", json!({"column": "A", "fillColor": "red"})).is_err());
+    // Sort by colour: green rows first, the others keep their order.
+    let key = json!({"column": "A", "by": "cellColor", "color": "#00FF00"});
+    s.execute("data.sort", json!({"range": "A1:C6", "header": true, "keys": [key]})).unwrap();
+    let col_a = |s: &mut Session| -> Vec<String> {
+        (2..=6).map(|r| s.execute("cell.get", json!({"cell": format!("A{r}")})).unwrap()["text"].as_str().unwrap().to_string()).collect()
+    };
+    assert_eq!(col_a(&mut s), vec!["Di", "Ed", "Ann", "Bob", "Cy"]);
+    let key = json!({"column": "A", "by": "fontColor", "color": "#0000FF"});
+    s.execute("data.sort", json!({"range": "A1:C6", "header": true, "keys": [key]})).unwrap();
+    assert_eq!(col_a(&mut s), vec!["Cy", "Di", "Ed", "Ann", "Bob"]);
+    let bad = json!({"column": "A", "color": "#0000FF"});
+    assert!(s.execute("data.sort", json!({"range": "A1:C6", "keys": [bad]})).is_err(), "a colour needs cellColor or fontColor");
+    // A colour filter in a filter view.
+    s.execute("data.createFilterView", json!({})).unwrap();
+    s.execute("data.filterBy", json!({"column": "A", "fillColor": "#FF0000", "view": 1})).unwrap();
+    show(&mut s, Some(1));
+    assert_eq!(shown_hidden(&s), vec![1, 2, 3, 4]);
+    let in_view = s.execute("data.filterColors", json!({"column": "A", "view": 1})).unwrap();
+    assert_eq!(in_view["fill"].as_array().unwrap().len(), 2);
+}

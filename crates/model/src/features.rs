@@ -1179,6 +1179,21 @@ pub struct AutoFilter {
     pub criteria: Vec<(u32, FilterCriterion)>,
 }
 
+/// A filter view (Google Sheets' Data › Filter views): a named filter over a range, saved with the
+/// file, that each person opens for themselves. Opening one changes only what that person's tab
+/// shows ([`crate::Sheet::view_rows`]); the sheet's own rows and its AutoFilter stay as they are.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FilterView {
+    /// Stable within the sheet (1, 2, …): what a tab remembers and commands name.
+    pub id: u32,
+    pub name: String,
+    /// The header row and the data below it, as an AutoFilter's range.
+    pub range: RangeRef,
+    /// Column offset within `range` → criterion, as in [`AutoFilter`].
+    #[serde(default)]
+    pub criteria: Vec<(u32, FilterCriterion)>,
+}
+
 /// A slicer: an on-sheet filter widget bound to one column of a table. Clicking its value tiles
 /// sets that column's `FilterCriterion::Values` in the sheet's [`AutoFilter`] and re-applies it,
 /// so a slicer is just a visual front-end over the existing filter machinery.

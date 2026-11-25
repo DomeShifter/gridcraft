@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::cell::{Cell, CellPicture};
 use crate::features::{
-    Anchor, AutoFilter, Chart, Comment, CondFormat, FormControl, Hyperlink, Image, LineInfo, ObjKind, ObjRef, PivotTable, PrintSettings, Shape,
-    ShapeKind, SheetProtection, Slicer, Sparkline, Table, Validation,
+    Anchor, AutoFilter, Chart, Comment, CondFormat, FilterView, FormControl, Hyperlink, Image, LineInfo, ObjKind, ObjRef, PivotTable,
+    PrintSettings, Shape, ShapeKind, SheetProtection, Slicer, Sparkline, Table, Validation,
 };
 use crate::store::CellStore;
 use crate::style::{Color, StyleId};
@@ -85,6 +85,21 @@ impl PartialEq for SheetUid {
     }
 }
 
+/// A filter view as one tab shows it ([`Sheet::view_rows`]): the view's id and the sheet's rows
+/// with the view's hiding in place of the shared filter's. Equal to any other, like [`SheetUid`]:
+/// it is how a sheet is shown here, not what it holds.
+#[derive(Clone, Debug, Default)]
+pub struct ViewRows {
+    pub view: Option<u32>,
+    pub rows: Arc<BTreeMap<u32, LineInfo>>,
+}
+
+impl PartialEq for ViewRows {
+    fn eq(&self, _: &ViewRows) -> bool {
+        true
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sheet {
     pub name: String,
@@ -136,6 +151,13 @@ pub struct Sheet {
     pub validations: Vec<Validation>,
     pub tables: Vec<Table>,
     pub autofilter: Option<AutoFilter>,
+    /// Filter views (Data › Filter views), saved with the file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filter_views: Vec<FilterView>,
+    /// The filter view this tab shows on the sheet, if any, and the rows as it shows them. Only
+    /// what is drawn reads it; not in JSON or the file, so nobody else sees it.
+    #[serde(skip)]
+    pub view_rows: ViewRows,
     #[serde(with = "crate::cellmap")]
     pub comments: BTreeMap<CellRef, Comment>,
     #[serde(with = "crate::cellmap")]
@@ -228,6 +250,8 @@ impl Sheet {
             validations: vec![],
             tables: vec![],
             autofilter: None,
+            filter_views: vec![],
+            view_rows: ViewRows::default(),
             comments: BTreeMap::new(),
             hyperlinks: BTreeMap::new(),
             charts: vec![],
@@ -470,7 +494,11 @@ impl Sheet {
 
     /// Whether this cell has a table or ordinary AutoFilter dropdown.
     pub fn has_filter_button(&self, c: CellRef) -> bool {
-        self.autofilter.as_ref().is_some_and(|af| af.range.start.row == c.row && af.range.contains(c))
+        let shown = match self.view_rows.view {
+            Some(id) => self.filter_views.iter().find(|v| v.id == id).map(|v| v.range),
+            None => self.autofilter.as_ref().map(|af| af.range),
+        };
+        shown.is_some_and(|r| r.start.row == c.row && r.contains(c))
             || self.tables.iter().any(|t| t.filter_button && t.header_row && t.range.start.row == c.row && t.range.contains(c))
     }
 
@@ -489,15 +517,30 @@ impl Sheet {
             _ => self.default_col_width,
         }
     }
+    /// The rows as shown: a filter view's when this tab shows one ([`Sheet::view_rows`]), else
+    /// the sheet's own.
+    pub fn display_rows(&self) -> &BTreeMap<u32, LineInfo> {
+        if self.view_rows.view.is_some() { &self.view_rows.rows } else { &self.rows }
+    }
     pub fn row_height(&self, row: u32) -> f32 {
-        match self.rows.get(&row) {
+        match self.display_rows().get(&row) {
             Some(i) if i.hidden => 0.0,
             Some(LineInfo { size: Some(h), .. }) => *h,
             _ => self.default_row_height,
         }
     }
     pub fn is_row_hidden(&self, row: u32) -> bool {
-        self.rows.get(&row).is_some_and(|r| r.hidden)
+        self.display_rows().get(&row).is_some_and(|r| r.hidden)
+    }
+    /// The filter whose buttons show: the filter view this tab shows ([`Sheet::view_rows`]), else
+    /// the sheet's AutoFilter.
+    pub fn shown_filter(&self) -> Option<AutoFilter> {
+        if let Some(id) = self.view_rows.view
+            && let Some(v) = self.filter_views.iter().find(|v| v.id == id)
+        {
+            return Some(AutoFilter { range: v.range, criteria: v.criteria.clone() });
+        }
+        self.autofilter.clone()
     }
     /// Whether `row` is hidden by an applied filter: a hidden row below the header of the
     /// sheet AutoFilter while it has criteria, or a hidden data row of a filtered table.
@@ -518,7 +561,7 @@ impl Sheet {
     /// Y offset (points) of the top of `row`.
     pub fn row_top(&self, row: u32) -> f64 {
         let mut y = row as f64 * self.default_row_height as f64;
-        for (r, info) in self.rows.range(..row) {
+        for (r, info) in self.display_rows().range(..row) {
             let _ = r;
             let h = if info.hidden { 0.0 } else { info.size.unwrap_or(self.default_row_height) };
             y += h as f64 - self.default_row_height as f64;
@@ -535,7 +578,7 @@ impl Sheet {
     }
     /// Row containing y (points from the top), clamped.
     pub fn row_at(&self, y: f64) -> u32 {
-        line_at(y, self.default_row_height as f64, &self.rows, gridcraft_core::MAX_ROWS)
+        line_at(y, self.default_row_height as f64, self.display_rows(), gridcraft_core::MAX_ROWS)
     }
     pub fn col_at(&self, x: f64) -> u32 {
         line_at(x, self.default_col_width as f64, &self.cols, gridcraft_core::MAX_COLS)

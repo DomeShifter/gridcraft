@@ -7,7 +7,7 @@ use gridcraft_core::date::{serial_from_ymd, time_fraction};
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_formula::Expr;
 use gridcraft_model::{
-    AutoFilter, Cell, CfOperator, CfRule, CfValueKind, Comment, CondFormat, DropdownDisplay, EditRange, ErrorStyle, FilterCriterion, Formula,
+    AutoFilter, Cell, CfOperator, CfRule, CfValueKind, Comment, CondFormat, DropdownDisplay, EditRange, ErrorStyle, FilterCriterion, FilterView, Formula,
     Hyperlink, ItemColor, LineInfo, MAX_ITEM_COLORS, NoteBox, NoteCorner, Orientation, PageOrder, PasswordHash, Sheet, SheetProtection, Sparkline,
     SparklineKind, Table, TableColumn, TotalsFn, Validation, ValidationKind, XmlColumnPr,
 };
@@ -867,6 +867,15 @@ fn read_ext(cx: &mut Ctx<'_>, e: &El, sheet: &mut Sheet) {
                             RangeRef::tidy(&mut v.ranges);
                             sheet.validations.push(v);
                         }
+                    }
+                }
+                // GridCraft's filter views (sheet_write/parts.rs `filter_views_ext`).
+                "filterViews" => {
+                    for v in c.kids("filterView") {
+                        let Some(af) = v.child("autoFilter").and_then(|a| read_autofilter(cx, a)) else { continue };
+                        let Some(id) = v.attr_u32("id").filter(|id| !sheet.filter_views.iter().any(|w| w.id == *id)) else { continue };
+                        let name = v.attr("name").unwrap_or("Filter").chars().take(255).collect();
+                        sheet.filter_views.push(FilterView { id, name, range: af.range, criteria: af.criteria });
                     }
                 }
                 // GridCraft's drop-down settings (sheet_write/rules.rs `dropdowns_ext`), matched to

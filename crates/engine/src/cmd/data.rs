@@ -23,9 +23,9 @@ mod sort;
 mod tools;
 mod validation;
 
-pub use filter::filter_values;
+pub use filter::{filter_colors, filter_values, show_filter_view, view_rows};
 pub(crate) use filter::{apply_filter, grow_autofilter};
-use filter::{clear_filter, filter_by, reapply, toggle_filter};
+use filter::{clear_filter, create_filter_view, delete_filter_view, filter_by, filter_colors_cmd, reapply, toggle_filter, update_filter_view};
 use grouping::{detail, group, outline_settings, show_levels, subtotal};
 use sort::{quick_sort, sort};
 #[cfg(test)]
@@ -64,10 +64,30 @@ pub fn specs() -> Vec<CommandSpec> {
             "Filter Column",
             [],
             None,
-            "{column: \"B\" (or 0-based offset), values?: [..], blanks?: bool, custom?: {op: \">\", value: \"10\", op2?, value2?, and?}, top?: {count, bottom?, percent?}, aboveAverage?: bool, clear?: bool}",
+            "{column: \"B\" (or 0-based offset), values?: [..], blanks?: bool, custom?: {op: \">\", value: \"10\", op2?, value2?, and?}, top?: {count, bottom?, percent?}, aboveAverage?: bool, fillColor?: \"#RRGGBB\" | colour, textColor?, clear?: bool, view?: id (a filter view's own filter)}",
             has_doc,
             filter_by
         ),
+        cmd!(
+            query "data.filterColors",
+            "Filter Colours",
+            [],
+            None,
+            "{column, view?} → {fill: [{color, hex}], text: [{color, hex}]}",
+            has_doc,
+            filter_colors_cmd
+        ),
+        cmd!(
+            "data.createFilterView",
+            "Create New Filter View",
+            [],
+            None,
+            "{name?, range?, fromFilter?: bool, copyOf?: id} → {id, name, range}",
+            has_doc,
+            create_filter_view
+        ),
+        cmd!("data.updateFilterView", "Filter View Options", [], None, "{view: id, name?, range?}", has_doc, update_filter_view),
+        cmd!("data.deleteFilterView", "Delete Filter View", [], None, "{view: id}", has_doc, delete_filter_view),
         cmd!("data.clearFilter", "Clear", ["Data", "Sort & Filter"], None, "{}", has_doc, clear_filter),
         cmd!("data.reapply", "Reapply", ["Data", "Sort & Filter"], None, "{}", has_doc, reapply),
         cmd!(

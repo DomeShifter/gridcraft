@@ -9,6 +9,9 @@ struct SortKey {
     desc: bool,
     by: String,
     list: Option<Vec<String>>,
+    /// Sort by colour: rows whose cell (`by` cellColor) or text (fontColor) has this colour go
+    /// first, the rest keep their order (Google Sheets' Sort by colour).
+    first: Option<gridcraft_model::Color>,
 }
 
 /// The sheet and range a sort works on: the sheet `sheet` or a `Sheet!` prefix on `range` names,
@@ -34,7 +37,7 @@ pub(super) fn quick_sort(s: &mut Session, p: &Json, asc: bool) -> Result<Json> {
     let d = s.doc()?;
     let sh = d.wb.sheet(sheet).ok_or(EngineError::NoDocument)?;
     let header = guess_header(&d.wb, sh, r);
-    do_sort(s, sheet, r, header, vec![SortKey { col, desc: !asc, by: "values".into(), list: None }], false, false)
+    do_sort(s, sheet, r, header, vec![SortKey { col, desc: !asc, by: "values".into(), list: None, first: None }], false, false)
 }
 
 pub(super) fn sort(s: &mut Session, p: &Json) -> Result<Json> {
@@ -60,11 +63,19 @@ pub(super) fn sort(s: &mut Session, p: &Json) -> Result<Json> {
             col_param(k.get("column"), r.start.col)
         };
         let Some(col) = col else { continue };
+        let by = k.get("by").and_then(Json::as_str).unwrap_or("values").to_string();
+        let first = match k.get("color").filter(|c| !c.is_null()) {
+            Some(_) if by == "values" => return Err(bad("data.sort", "a sort key with `color` needs `by`: cellColor or fontColor")),
+            Some(Json::String(t)) => Some(gridcraft_model::Color::from_hex(t).ok_or_else(|| bad("data.sort", format!("`{t}` is not a colour")))?),
+            Some(c) => Some(serde_json::from_value(c.clone()).map_err(|_| bad("data.sort", "not a colour"))?),
+            None => None,
+        };
         keys.push(SortKey {
             col,
-            desc: k.get("order").and_then(Json::as_str) == Some("desc"),
-            by: k.get("by").and_then(Json::as_str).unwrap_or("values").to_string(),
+            desc: first.is_none() && k.get("order").and_then(Json::as_str) == Some("desc"),
+            by,
             list: k.get("customList").and_then(Json::as_array).map(|l| l.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()),
+            first,
         });
     }
     if keys.is_empty() {
@@ -102,6 +113,11 @@ fn do_sort(s: &mut Session, sheet: usize, r: RangeRef, header: bool, keys: Vec<S
         let key_val = |i: u32, k: &SortKey| -> (Value, u32) {
             let c = line(i, k.col);
             let v = sh.value(c);
+            let style = styles.get(sh.style_id(c));
+            if let Some(want) = &k.first {
+                let have = if k.by == "fontColor" { &style.font.color } else { &style.fill.fg };
+                return (v, u32::from(have != want));
+            }
             let color = match k.by.as_str() {
                 "cellColor" => {
                     styles.get(sh.style_id(c)).fill.fg.resolve(&theme).map(|[r, g, b]| u32::from_be_bytes([0, r, g, b])).unwrap_or(u32::MAX)

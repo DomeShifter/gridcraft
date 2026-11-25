@@ -10,6 +10,7 @@ mod chart_ref_offsets;
 mod controls_tests;
 mod csv_tests;
 mod dropdown_axis_roundtrip;
+mod filter_views_roundtrip;
 mod encrypted_tests;
 mod equation_tests;
 mod fixtures;

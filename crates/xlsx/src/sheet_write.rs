@@ -235,7 +235,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
         }
         let _ = write!(s, "<tableParts count=\"{}\">{parts}</tableParts>", tables.len());
     }
-    write_sheet_extensions(&mut s, sheet, &prio);
+    write_sheet_extensions(&mut s, sheet, &prio, out);
     s.push_str("</worksheet>");
     (s, rels)
 }
@@ -293,7 +293,7 @@ fn literal(v: &Value) -> String {
     }
 }
 
-fn write_sheet_extensions(s: &mut String, sheet: &Sheet, prio: &[u32]) {
+fn write_sheet_extensions(s: &mut String, sheet: &Sheet, prio: &[u32], out: &mut Out) {
     // Excel 2010 extensions: solid data bars, then sparklines.
     let solid_bars: Vec<(&CondFormat, u32)> = sheet
         .cond_formats
@@ -307,7 +307,7 @@ fn write_sheet_extensions(s: &mut String, sheet: &Sheet, prio: &[u32]) {
         .iter()
         .filter(|v| !v.ranges.is_empty() && (v.multiple || v.display != DropdownDisplay::Arrow || !v.item_colors.is_empty()))
         .collect();
-    let any = !solid_bars.is_empty() || !sheet.sparklines.is_empty() || !dropdowns.is_empty();
+    let any = !solid_bars.is_empty() || !sheet.sparklines.is_empty() || !dropdowns.is_empty() || !sheet.filter_views.is_empty();
     if any {
         s.push_str("<extLst>");
     }
@@ -348,6 +348,9 @@ fn write_sheet_extensions(s: &mut String, sheet: &Sheet, prio: &[u32]) {
     }
     if !dropdowns.is_empty() {
         s.push_str(&rules::dropdowns_ext(&dropdowns));
+    }
+    if !sheet.filter_views.is_empty() {
+        s.push_str(&parts::filter_views_ext(sheet, out));
     }
     if any {
         s.push_str("</extLst>");

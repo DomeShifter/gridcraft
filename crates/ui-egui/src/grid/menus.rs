@@ -2,6 +2,7 @@ use super::editor::popup_dismissed;
 use super::geo::Geo;
 use super::tables::filter_table_range;
 use super::{Arc, Drag, FillTag, RangeRef, Rect, Sense, Sheet, SheetApp, Stroke, Tokens, col_to_letters, json, pos2, vec2};
+use gridcraft_engine::model::{Color, FilterCriterion};
 
 /// Draws the filter-header popup: sort, search/select-all, apply/clear, a lazily installed table autofilter, new-open search focus and dismissal.
 pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool) {
@@ -14,6 +15,7 @@ pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
     // Tables get an autofilter on demand.
     let table_range = filter_table_range(sh, col, row);
     if sh.autofilter.is_none()
+        && sh.view_rows.view.is_none()
         && let Some(r) = table_range
     {
         let _ = app.session.run("data.filter", json!({"range": r.a1()}));
@@ -32,6 +34,8 @@ pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
     }
     let wb = app.session.active().map(|d| d.wb.clone()).unwrap_or(wb);
     let values = gridcraft_engine::cmd::data::filter_values(&wb, si, col);
+    let fcx = filter_ctx(&wb, si, col);
+    let view = fcx.view;
     let key = egui::Id::unique(("filter_sel", col));
     let search_key = egui::Id::unique(("filter_search", col));
     let buttons_key = egui::Id::unique(("filter_buttons", col));
@@ -43,13 +47,15 @@ pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
     let mut close = false;
     if let Some(look) = app.ui.menu_look {
         let ids = SheetsFilterIds { key, search_key };
-        let r = sheets_filter_menu(app, ui, (col, at), &values, look, ids, (was_open, enter));
+        let r = sheets_filter_menu(app, ui, (col, at), &values, look, ids, (was_open, enter), &fcx);
         close = r.0;
         if close || popup_dismissed(&r.1, was_open) {
             ui.ctx().data_mut(|d| {
                 d.remove::<Vec<(String, bool)>>(key);
                 d.remove::<String>(search_key);
                 d.remove::<Vec<egui::Id>>(buttons_key);
+                d.remove::<bool>(egui::Id::unique(("filter_sort_colour", col)));
+                d.remove::<bool>(egui::Id::unique(("filter_by_colour", col)));
             });
             app.grid.filter_menu = None;
         }
@@ -59,12 +65,13 @@ pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
     let response = area.show(ui.ctx(), |ui| {
         egui::Frame::popup(ui.style()).show(ui, |ui| {
             ui.set_width(230.0);
-            let ascending = ui.button("↑  Sort Ascending");
+            // A filter view can't sort for one person yet: its rows show in the sheet's order.
+            let ascending = ui.add_enabled(view.is_none(), egui::Button::new("↑  Sort Ascending"));
             if ascending.clicked() {
                 let _ = app.run("data.sortAscending", json!({"column": col_to_letters(col)}));
                 close = true;
             }
-            let descending = ui.button("↓  Sort Descending");
+            let descending = ui.add_enabled(view.is_none(), egui::Button::new("↓  Sort Descending"));
             if descending.clicked() {
                 let _ = app.run("data.sortDescending", json!({"column": col_to_letters(col)}));
                 close = true;
@@ -104,7 +111,7 @@ pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
             ui.horizontal(|ui| {
                 let clear = ui.button("Clear Filter");
                 if clear.clicked() {
-                    let _ = app.run("data.filterBy", json!({"column": col_to_letters(col), "clear": true}));
+                    let _ = app.run("data.filterBy", in_view(json!({"column": col_to_letters(col), "clear": true}), view));
                     close = true;
                 }
                 // Nothing checked would hide every row, so Enter (unlike a click on Apply) does nothing then.
@@ -119,7 +126,7 @@ pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
                     } else {
                         json!({"column": col_to_letters(col), "values": vals, "blanks": blanks})
                     };
-                    let _ = app.run("data.filterBy", p);
+                    let _ = app.run("data.filterBy", in_view(p, view));
                     close = true;
                 }
             });
@@ -151,8 +158,10 @@ fn sheets_filter_menu(
     look: crate::MenuLook,
     ids: SheetsFilterIds,
     (was_open, enter): (bool, bool),
+    fcx: &FilterCtx,
 ) -> (bool, egui::Response) {
-    const W: f32 = 300.0;
+    const W: f32 = FILTER_MENU_W;
+    let view = fcx.view;
     const GREEN: egui::Color32 = egui::Color32::from_rgb(0x14, 0x6C, 0x2E);
     const LINK: egui::Color32 = egui::Color32::from_rgb(0x1A, 0x73, 0xE8);
     let grey = egui::Color32::from_gray(0x5F);
@@ -162,15 +171,44 @@ fn sheets_filter_menu(
         egui::Frame::menu(ui.style()).show(ui, |ui| {
             (look.style)(ui);
             ui.set_width(W);
-            if ui.add_sized([W, 32.0], (look.row)("Sort A to Z", "")).clicked() {
-                let _ = app.run("data.sortAscending", json!({"column": col_to_letters(col)}));
+            // A filter view can't sort for one person yet (its rows show in the sheet's order), so
+            // its menu has no sorting rather than sorting the sheet for everyone.
+            if view.is_none() {
+                if ui.add_sized([W, 32.0], (look.row)("Sort A to Z", "")).clicked() {
+                    let _ = app.run("data.sortAscending", json!({"column": col_to_letters(col)}));
+                    close = true;
+                }
+                if ui.add_sized([W, 32.0], (look.row)("Sort Z to A", "")).clicked() {
+                    let _ = app.run("data.sortDescending", json!({"column": col_to_letters(col)}));
+                    close = true;
+                }
+                if let Some((fill, color)) = colour_section(ui, look, "Sort by colour", egui::Id::unique(("filter_sort_colour", col)), fcx, None)
+                    && let Some(range) = fcx.range
+                {
+                    let by = if fill { "cellColor" } else { "fontColor" };
+                    let key = json!({"column": col_to_letters(col), "by": by, "color": color});
+                    let _ = app.run("data.sort", json!({"range": range.a1(), "header": true, "keys": [key]}));
+                    close = true;
+                }
+                (look.sep)(ui);
+            }
+            let ticked = match &fcx.current {
+                Some(FilterCriterion::FillColor(c)) => Some((true, *c)),
+                Some(FilterCriterion::FontColor(c)) => Some((false, *c)),
+                _ => None,
+            };
+            if let Some((fill, color)) = colour_section(ui, look, "Filter by colour", egui::Id::unique(("filter_by_colour", col)), fcx, ticked) {
+                // Picking the colour the column already filters by takes the filter off.
+                let p = if ticked == Some((fill, color)) {
+                    json!({"column": col_to_letters(col), "clear": true})
+                } else if fill {
+                    json!({"column": col_to_letters(col), "fillColor": color})
+                } else {
+                    json!({"column": col_to_letters(col), "textColor": color})
+                };
+                let _ = app.run("data.filterBy", in_view(p, view));
                 close = true;
             }
-            if ui.add_sized([W, 32.0], (look.row)("Sort Z to A", "")).clicked() {
-                let _ = app.run("data.sortDescending", json!({"column": col_to_letters(col)}));
-                close = true;
-            }
-            (look.sep)(ui);
             let mut checks: Vec<(String, bool)> = ui.ctx().data_mut(|d| d.get_temp::<Vec<(String, bool)>>(ids.key)).unwrap_or(values.to_vec());
             let mut search: String = ui.ctx().data_mut(|d| d.get_temp(ids.search_key)).unwrap_or_default();
             let needle = search.trim().to_lowercase();
@@ -238,7 +276,7 @@ fn sheets_filter_menu(
                     } else {
                         json!({"column": col_to_letters(col), "values": vals, "blanks": blanks})
                     };
-                    let _ = app.run("data.filterBy", p);
+                    let _ = app.run("data.filterBy", in_view(p, view));
                     close = true;
                 }
             });
@@ -246,6 +284,99 @@ fn sheets_filter_menu(
         });
     });
     (close, response.response)
+}
+
+const FILTER_MENU_W: f32 = 300.0;
+
+/// What the filter menu of one column needs besides its values: the filter view shown (whose
+/// filter the menu changes), the filter's range, the column's colours and its current criterion.
+pub(super) struct FilterCtx {
+    view: Option<u32>,
+    range: Option<RangeRef>,
+    fill: Vec<(Color, egui::Color32)>,
+    text: Vec<(Color, egui::Color32)>,
+    current: Option<FilterCriterion>,
+}
+
+fn filter_ctx(wb: &gridcraft_engine::model::Workbook, si: usize, col: u32) -> FilterCtx {
+    let sh = wb.sheet(si);
+    let shown = sh.and_then(|s| s.shown_filter());
+    let (fill, text) = match (sh, &shown) {
+        (Some(sh), Some(af)) => gridcraft_engine::cmd::data::filter_colors(wb, sh, af.range, col),
+        _ => (vec![], vec![]),
+    };
+    let swatch = |c: Color, auto: [u8; 3]| {
+        let [r, g, b] = c.resolve(&wb.theme).unwrap_or(auto);
+        (c, egui::Color32::from_rgb(r, g, b))
+    };
+    FilterCtx {
+        view: sh.and_then(|s| s.view_rows.view),
+        range: shown.as_ref().map(|af| af.range),
+        fill: fill.into_iter().map(|c| swatch(c, [255, 255, 255])).collect(),
+        text: text.into_iter().map(|c| swatch(c, [0, 0, 0])).collect(),
+        current: shown.and_then(|af| af.criteria.iter().find(|(o, _)| af.range.start.col + o == col).map(|(_, c)| c.clone())),
+    }
+}
+
+/// A filter command's parameters for the filter view shown, if one is: it changes the view's own
+/// filter, not the sheet's.
+fn in_view(mut p: serde_json::Value, view: Option<u32>) -> serde_json::Value {
+    if let (Some(v), Some(o)) = (view, p.as_object_mut()) {
+        o.insert("view".into(), json!(v));
+    }
+    p
+}
+
+/// "▸ Sort by colour" / "▸ Filter by colour" in the Sheets filter menu: a row that opens to the
+/// column's fill colours and text colours, each a swatch with its hex code (✓ by `ticked`).
+/// Returns the colour picked: (a fill colour?, the colour).
+fn colour_section(
+    ui: &mut egui::Ui,
+    look: crate::MenuLook,
+    title: &str,
+    open_key: egui::Id,
+    fcx: &FilterCtx,
+    ticked: Option<(bool, Color)>,
+) -> Option<(bool, Color)> {
+    const W: f32 = FILTER_MENU_W;
+    let grey = egui::Color32::from_gray(0x5F);
+    let mut open: bool = ui.ctx().data_mut(|d| d.get_temp(open_key)).unwrap_or(false);
+    let label = format!("{}  {title}", if open { "▾" } else { "▸" });
+    if ui.add_sized([W, 32.0], (look.row)(&label, "")).clicked() {
+        open = !open;
+        ui.ctx().data_mut(|d| d.insert_temp(open_key, open));
+    }
+    if !open {
+        return None;
+    }
+    let mut picked = None;
+    for (fill, list, heading) in [(true, &fcx.fill, "Fill colour"), (false, &fcx.text, "Text colour")] {
+        egui::Frame::NONE.inner_margin(egui::Margin { left: 36, right: 16, top: 4, bottom: 2 }).show(ui, |ui| {
+            ui.label(egui::RichText::new(heading).size(12.0).color(grey));
+            if list.is_empty() {
+                ui.label(egui::RichText::new("None in this column").size(12.0).color(grey));
+            }
+        });
+        for (color, shown) in list {
+            let (r, resp) = ui.allocate_exact_size(vec2(W, 28.0), Sense::click());
+            if resp.hovered() {
+                ui.painter().rect_filled(r, 0.0, egui::Color32::from_gray(0xF1));
+            }
+            if ticked == Some((fill, *color)) {
+                let c = r.left_center() + vec2(22.0, 0.0);
+                ui.painter().line(vec![c + vec2(-5.0, 0.0), c + vec2(-1.5, 3.5), c + vec2(5.5, -4.0)], Stroke::new(1.6, egui::Color32::from_gray(0x44)));
+            }
+            let sw = Rect::from_center_size(r.left_center() + vec2(46.0, 0.0), vec2(16.0, 16.0));
+            ui.painter().rect_filled(sw, 3.0, *shown);
+            ui.painter().rect_stroke(sw, 3.0, Stroke::new(1.0, egui::Color32::from_gray(0xC4)), egui::StrokeKind::Inside);
+            let hex = format!("#{:02X}{:02X}{:02X}", shown.r(), shown.g(), shown.b());
+            ui.painter().text(r.left_center() + vec2(64.0, 0.0), egui::Align2::LEFT_CENTER, hex, egui::FontId::proportional(13.0), egui::Color32::from_gray(0x20));
+            if resp.clicked() {
+                picked = Some((fill, *color));
+            }
+        }
+    }
+    picked
 }
 
 /// Draws and dispatches the cell context menu, including Show Details when offered, clipboard and insert/format actions; closes on Esc or an outside press.
