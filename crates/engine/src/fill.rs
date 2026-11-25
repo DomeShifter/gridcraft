@@ -622,52 +622,63 @@ pub fn series(cx: &mut Ctx, sheet: usize, options: SeriesOptions<'_>) -> Result<
 /// with literal separators, upper/lower/proper case, and fixed-position substrings.
 pub fn flash_fill(cx: &mut Ctx, sheet: usize, at: CellRef) -> Result<usize> {
     let Some(sh) = cx.wb.sheet(sheet) else { return Ok(0) };
-    if at.col == 0 {
+    let writes = flash_fill_preview(&cx.wb, sheet, at);
+    if writes.is_empty() {
         return Ok(0);
     }
-    let src_col = at.col - 1;
-    // Rows of the data region in the source column.
-    let mut top = at.row;
-    while top > 0 && !sh.value(CellRef::new(top - 1, src_col)).is_empty() {
-        top -= 1;
-    }
-    let mut bottom = at.row;
-    while bottom + 1 < gridcraft_core::MAX_ROWS && !sh.value(CellRef::new(bottom + 1, src_col)).is_empty() && bottom - top < 1_000_000 {
-        bottom += 1;
-    }
-    // Header row: skip a first row whose target is text and source looks like a header? Keep simple.
-    let mut examples = Vec::new();
-    let mut todo = Vec::new();
-    // Flash Fill works on the text cells show (a date as formatted, not its serial number).
-    for r in top..=bottom {
-        let src = crate::display::cell_text(&cx.wb, sh, CellRef::new(r, src_col));
-        if sh.value(CellRef::new(r, at.col)).is_empty() {
-            todo.push((r, src));
-        } else {
-            examples.push((src, crate::display::cell_text(&cx.wb, sh, CellRef::new(r, at.col))));
-        }
-    }
-    if examples.is_empty() {
-        return Ok(0);
-    }
-    let Some(program) = learn(&examples) else { return Ok(0) };
-    let mut n = 0;
-    let style = sh.style_id(CellRef::new(top, at.col));
-    let mut writes = Vec::new();
-    for (r, src) in todo {
-        if let Some(out) = program.apply(&src) {
-            writes.push((CellRef::new(r, at.col), out));
-            n += 1;
-        }
-    }
+    let style = sh.style_id(CellRef::new(column_top(sh, at), at.col));
     let sh = cx.sheet_mut(sheet)?;
     for (c, out) in &writes {
         sh.set_cell(*c, Cell { value: Value::text(out.as_str()), formula: None, style, py: None });
     }
-    for (c, _) in writes {
-        cx.touch(sheet, c);
+    for (c, _) in &writes {
+        cx.touch(sheet, *c);
     }
-    Ok(n)
+    Ok(writes.len())
+}
+
+/// The first row of the source column's data region around `at` (the column to its left).
+fn column_top(sh: &gridcraft_model::Sheet, at: CellRef) -> u32 {
+    let src_col = at.col.saturating_sub(1);
+    let mut top = at.row;
+    while top > 0 && !sh.value(CellRef::new(top - 1, src_col)).is_empty() {
+        top -= 1;
+    }
+    top
+}
+
+/// What [`flash_fill`] would write for `at`, without writing it: each empty cell of `at`'s
+/// column in the data region and its text, top to bottom (StarSheets 0097). Empty when there is
+/// no example to learn from or no pattern fits every example. A host can show this as a
+/// suggestion (Google Sheets' Smart Fill) before running `edit.flashFill`.
+pub fn flash_fill_preview(wb: &Workbook, sheet: usize, at: CellRef) -> Vec<(CellRef, String)> {
+    let Some(sh) = wb.sheet(sheet) else { return Vec::new() };
+    if at.col == 0 {
+        return Vec::new();
+    }
+    let src_col = at.col - 1;
+    // Rows of the data region in the source column.
+    let top = column_top(sh, at);
+    let mut bottom = at.row;
+    while bottom + 1 < gridcraft_core::MAX_ROWS && !sh.value(CellRef::new(bottom + 1, src_col)).is_empty() && bottom - top < 1_000_000 {
+        bottom += 1;
+    }
+    let mut examples = Vec::new();
+    let mut todo = Vec::new();
+    // Flash Fill works on the text cells show (a date as formatted, not its serial number).
+    for r in top..=bottom {
+        let src = crate::display::cell_text(wb, sh, CellRef::new(r, src_col));
+        if sh.value(CellRef::new(r, at.col)).is_empty() {
+            todo.push((r, src));
+        } else {
+            examples.push((src, crate::display::cell_text(wb, sh, CellRef::new(r, at.col))));
+        }
+    }
+    if examples.is_empty() {
+        return Vec::new();
+    }
+    let Some(program) = learn(&examples) else { return Vec::new() };
+    todo.into_iter().filter_map(|(r, src)| program.apply(&src).map(|out| (CellRef::new(r, at.col), out))).collect()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -809,6 +820,24 @@ mod tests {
         s.execute("data.flashFill", serde_json::json!({})).unwrap();
         let sh = s.doc().unwrap().wb.active().unwrap();
         assert_eq!(sh.value(CellRef::new(1, 1)), Value::from("03/12/2023"));
+    }
+
+    #[test]
+    fn flash_fill_preview_matches_what_flash_fill_writes() {
+        // StarSheets 0097: the suggestion a host shows is what Flash Fill then writes.
+        let mut s = crate::Session::new();
+        s.new_workbook();
+        let values = serde_json::json!([["Ada Lovelace", "Ada"], ["Alan Turing", null], ["Grace Hopper", null]]);
+        s.execute("range.setValues", serde_json::json!({"range": "A1", "values": values})).unwrap();
+        let wb = &s.doc().unwrap().wb;
+        let want = vec![(CellRef::new(1, 1), "Alan".to_string()), (CellRef::new(2, 1), "Grace".to_string())];
+        assert_eq!(flash_fill_preview(wb, 0, CellRef::new(1, 1)), want);
+        assert!(flash_fill_preview(wb, 0, CellRef::new(1, 0)).is_empty(), "nothing to the left");
+        assert!(flash_fill_preview(wb, 0, CellRef::new(1, 2)).is_empty(), "no examples in column C");
+        s.execute("selection.set", serde_json::json!({"cell": "B2"})).unwrap();
+        s.execute("data.flashFill", serde_json::json!({})).unwrap();
+        let sh = s.doc().unwrap().wb.active().unwrap();
+        assert_eq!(sh.value(CellRef::new(2, 1)), Value::from("Grace"));
     }
 
     #[test]
