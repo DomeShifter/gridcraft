@@ -665,6 +665,7 @@ pub fn flash_fill_preview(wb: &Workbook, sheet: usize, at: CellRef) -> Vec<(Cell
     }
     let mut examples = Vec::new();
     let mut todo = Vec::new();
+    let header = !sh.value(CellRef::new(top, at.col)).is_empty();
     // Flash Fill works on the text cells show (a date as formatted, not its serial number).
     for r in top..=bottom {
         let src = crate::display::cell_text(wb, sh, CellRef::new(r, src_col));
@@ -677,7 +678,10 @@ pub fn flash_fill_preview(wb: &Workbook, sheet: usize, at: CellRef) -> Vec<(Cell
     if examples.is_empty() {
         return Vec::new();
     }
-    let Some(program) = learn(&examples) else { return Vec::new() };
+    // A first row that fits no pattern with the others is taken as a header ("Name" / "First"),
+    // as Google Sheets and Excel do, when there are other examples to learn from.
+    let program = learn(&examples).or_else(|| if header && examples.len() > 1 { learn(&examples[1..]) } else { None });
+    let Some(program) = program else { return Vec::new() };
     todo.into_iter().filter_map(|(r, src)| program.apply(&src).map(|out| (CellRef::new(r, at.col), out))).collect()
 }
 
@@ -834,6 +838,12 @@ mod tests {
         assert_eq!(flash_fill_preview(wb, 0, CellRef::new(1, 1)), want);
         assert!(flash_fill_preview(wb, 0, CellRef::new(1, 0)).is_empty(), "nothing to the left");
         assert!(flash_fill_preview(wb, 0, CellRef::new(1, 2)).is_empty(), "no examples in column C");
+        // A header row above the examples is skipped.
+        let mut h = crate::Session::new();
+        h.new_workbook();
+        let values = serde_json::json!([["Name", "First"], ["Ada Lovelace", "Ada"], ["Alan Turing", "Alan"], ["Grace Hopper", null]]);
+        h.execute("range.setValues", serde_json::json!({"range": "A1", "values": values})).unwrap();
+        assert_eq!(flash_fill_preview(&h.doc().unwrap().wb, 0, CellRef::new(3, 1)), vec![(CellRef::new(3, 1), "Grace".to_string())]);
         s.execute("selection.set", serde_json::json!({"cell": "B2"})).unwrap();
         s.execute("data.flashFill", serde_json::json!({})).unwrap();
         let sh = s.doc().unwrap().wb.active().unwrap();
