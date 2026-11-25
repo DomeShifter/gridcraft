@@ -118,7 +118,9 @@ pub mod desktop_theme;
 /// How a host draws the cell and header menus: `style` sets up the menu's `Ui` and returns the
 /// row width, `row` builds a row from its label and shortcut text, `sep` draws a divider.
 /// `list_style` sets up a drop-down list (data validation) and returns a width that fits its
-/// choices; `list_row` builds one of its rows (no icon column).
+/// choices; `list_row` builds one of its rows (no icon column). `list_item`, when given, draws
+/// a whole choice row instead (Google Sheets: each choice as its coloured chip, with a tick box
+/// for multiple selections) and returns its response.
 #[derive(Clone, Copy, Debug)]
 pub struct MenuLook {
     pub style: fn(&mut egui::Ui) -> f32,
@@ -126,6 +128,23 @@ pub struct MenuLook {
     pub sep: fn(&mut egui::Ui),
     pub list_style: fn(&mut egui::Ui, &[String]) -> f32,
     pub list_row: fn(&str) -> egui::Button<'static>,
+    pub list_item: Option<fn(&mut egui::Ui, &ListItem<'_>) -> egui::Response>,
+}
+
+/// One choice of a drop-down list, for [`MenuLook::list_item`].
+#[derive(Clone, Copy, Debug)]
+pub struct ListItem<'a> {
+    pub text: &'a str,
+    /// The item's chip colour, when the rule gives it one.
+    pub color: Option<egui::Color32>,
+    /// The rule shows its cells as chips.
+    pub chips: bool,
+    /// Multiple selections: whether the item is ticked. `None` for a one-choice list.
+    pub ticked: Option<bool>,
+    /// The keyboard is on this row.
+    pub selected: bool,
+    /// The row's width and height.
+    pub size: egui::Vec2,
 }
 
 /// Persisted UI preferences.

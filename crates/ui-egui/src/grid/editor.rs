@@ -224,6 +224,18 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
                 for (k, it) in items.iter().enumerate() {
                     let on = key == Some(k);
                     let row = match look {
+                        Some(crate::MenuLook { list_item: Some(draw), .. }) => {
+                            let color = dv.item_color(it).and_then(|c| c.resolve(&wb.theme)).map(theme::color32);
+                            let item = crate::ListItem {
+                                text: it.as_str(),
+                                color,
+                                chips: dv.display == gridcraft_engine::model::DropdownDisplay::Chip,
+                                ticked: dv.multiple.then(|| is_picked(it.as_str())),
+                                selected: on,
+                                size: vec2(width, 32.0),
+                            };
+                            draw(ui, &item)
+                        }
                         _ if dv.multiple => {
                             let mut ticked = is_picked(it.as_str());
                             let h = if look.is_some() { 32.0 } else { LIST_PICKER_ROW_H };
