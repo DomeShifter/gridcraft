@@ -810,6 +810,36 @@ fn move_columns_can_reorder_left_and_ignores_drops_inside_the_selection() {
 }
 
 #[test]
+fn move_rows_reorders_up_and_down_and_undoes_once() {
+    // StarSheets 0096: Edit › Move › Row up / down.
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["a"], ["b"], ["c"], ["d"], ["e"]]})).unwrap();
+    s.execute("cell.set", json!({"cell": "C1", "input": "=A2&A4"})).unwrap();
+    s.execute("home.rowHeight", json!({"rows": "2:2", "height": 31})).unwrap();
+    let before = s.doc().unwrap().wb.clone();
+    s.doc_mut().unwrap().undo.clear();
+    let col = |s: &Session| (0..5).map(|row| v(s, &CellRef::new(row, 0).a1())).collect::<Vec<_>>();
+
+    // Rows 2:3 down past row 4: a, d, b, c, e.
+    let result = s.execute("sheet.moveRows", json!({"rows": "2:3", "before": 4})).unwrap();
+    assert_eq!(result["rows"], "3:4");
+    assert_eq!(col(&s), vec!["a".into(), "d".into(), "b".into(), "c".into(), "e".into()]);
+    assert_eq!(s.execute("cell.get", json!({"cell": "C1"})).unwrap()["formula"], "=A3&A2");
+    assert_eq!(s.doc().unwrap().wb.active().unwrap().row_height(2), 31.0);
+    assert_eq!(s.doc().unwrap().selection.current().a1(), "3:4");
+    assert_eq!(s.doc().unwrap().undo.len(), 1);
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(*s.doc().unwrap().wb, *before);
+
+    // Row 5 up above row 4: a, b, c, e, d; a drop inside the rows does nothing.
+    s.execute("sheet.moveRows", json!({"rows": "5:5", "before": 3})).unwrap();
+    assert_eq!(col(&s), vec!["a".into(), "b".into(), "c".into(), "e".into(), "d".into()]);
+    let undo = s.doc().unwrap().undo.len();
+    s.execute("sheet.moveRows", json!({"rows": "2:3", "before": 2})).unwrap();
+    assert_eq!(s.doc().unwrap().undo.len(), undo);
+}
+
+#[test]
 fn insert_copied_cells_inserts_rows_columns_and_blocks() {
     // Issue #21: Insert Copied Cells.
     let mut s = s();
