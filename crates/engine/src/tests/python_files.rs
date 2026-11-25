@@ -590,15 +590,26 @@ fn rebuilt_results_have_a_budget_across_the_workbook() {
 fn hostile_python_content_in_files_is_capped() {
     let (mut s, _) = build();
     let bytes = save(&mut s, "json");
-    // Make the Python cells hostile: code over the limit, and a result whose shape claims far
-    // more cells than it holds (the array fields are public, so a crafted file can say anything).
+    // A result whose shape claims far more cells than it holds: the file is refused as it is
+    // read (Array decodes through Array::new), so nothing sizes a buffer from the claimed shape.
+    let mut wb: Workbook = serde_json::from_slice(&bytes).unwrap();
+    let sh = wb.sheet_mut(0).unwrap();
+    let c1 = sh.cells.get_mut(CellRef::parse("C1").unwrap()).unwrap();
+    let out = Arc::make_mut(c1.py.as_mut().unwrap()).output.as_mut().unwrap();
+    out.value = Value::Array(Arc::new(Array { rows: 100_000, cols: 100_000, data: vec![Value::Number(1.0)] }));
+    let lying = serde_json::to_vec(&wb).unwrap();
+    assert!(crate::io::open_bytes("lying.json", &lying).is_err(), "a lying array shape is refused");
+
+    // Make the Python cells hostile: code over the limit, and a well-formed result with more
+    // cells than a Python result may hold.
     let mut wb: Workbook = serde_json::from_slice(&bytes).unwrap();
     let sh = wb.sheet_mut(0).unwrap();
     let b1 = sh.cells.get_mut(CellRef::parse("B1").unwrap()).unwrap();
     Arc::make_mut(b1.py.as_mut().unwrap()).code = "y".repeat(9_000);
     let c1 = sh.cells.get_mut(CellRef::parse("C1").unwrap()).unwrap();
     let out = Arc::make_mut(c1.py.as_mut().unwrap()).output.as_mut().unwrap();
-    out.value = Value::Array(Arc::new(Array { rows: 100_000, cols: 100_000, data: vec![Value::Number(1.0)] }));
+    let n = gridcraft_model::python::MAX_RESULT_CELLS + 1;
+    out.value = Value::Array(Arc::new(Array::new(1, n, vec![Value::Number(1.0); n]).unwrap()));
     let bytes = serde_json::to_vec(&wb).unwrap();
     let (wb, warnings) = crate::io::open_bytes("evil.json", &bytes).unwrap();
     let sh = wb.sheet(0).unwrap();
@@ -607,7 +618,7 @@ fn hostile_python_content_in_files_is_capped() {
     assert_eq!(b1.value, Value::Number(42.0), "the cached value stays");
     assert!(warnings.iter().any(|w| w.contains("Python cell")), "{warnings:?}");
     let c1 = sh.cell(CellRef::parse("C1").unwrap()).unwrap();
-    assert!(c1.py.as_ref().unwrap().output.is_none(), "a malformed result is dropped");
+    assert!(c1.py.as_ref().unwrap().output.is_none(), "an over-size result is dropped");
     open(&mut s, "evil.json", &bytes);
     s.execute("formulas.calculateNow", json!({})).unwrap();
     assert_eq!(v(&s, "C1"), Value::Number(1.0));
