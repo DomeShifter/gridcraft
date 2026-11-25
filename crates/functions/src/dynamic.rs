@@ -1376,7 +1376,7 @@ mod tests {
         let r = ev("FILTER", vec![rf(grid()), av(row(&[1.0, 1.0, 0.0])), av(row(&[0.0, 1.0, 1.0]))]);
         assert_eq!(rows_of(&r), vec![vec![nv(2.0)], vec![nv(3.0)], vec![nv(1.0)]]);
         // No row passes every condition: Google's #N/A ("No matches are found").
-        is_err(ev("FILTER", vec![rf(grid()), av(col(&[1.0, 0.0, 0.0])), c2(), c1()]), CellError::NA);
+        is_err(ev("FILTER", vec![rf(grid()), av(col(&[0.0, 1.0, 0.0])), c2(), c1()]), CellError::NA);
         is_err(ev("FILTER", vec![rf(grid()), av(col(&[0.0, 1.0, 0.0])), c2()]), CellError::NA);
         // Conditions must all match the range's shape; an error in one comes through.
         is_err(ev("FILTER", vec![rf(grid()), c1(), av(col(&[1.0, 0.0])), c2()]), CellError::Value);
