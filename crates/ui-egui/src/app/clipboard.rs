@@ -52,6 +52,9 @@ impl SheetApp {
     /// the text that was there when GridCraft last copied without publishing, GridCraft's own
     /// clipboard is pasted.
     pub fn paste_from_clipboard(&mut self) {
+        if self.services.paste_start.as_mut().is_some_and(|start| start()) {
+            return;
+        }
         match self.system_clipboard_text() {
             Some(text) if self.session.clipboard.is_none() || self.clipboard_text_at_copy.as_ref() != Some(&text) => self.paste_external(text),
             Some(_) => self.run_or_alert("edit.paste", json!({})),
