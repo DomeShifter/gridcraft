@@ -55,6 +55,21 @@ impl SheetApp {
         updates_ui::start(self, false);
     }
 
+    /// A host app that embeds GridCraft under its own name: the check at start (only when the host
+    /// calls [`Self::start_update_check`]) and Help ▸ Check for Updates… ask for `app`'s releases
+    /// from its own repository and compare them with `version`, never GridCraft's.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_update_app(&mut self, app: &'static craft_update::app::App, version: &'static str) {
+        updates_ui::set_app(self, app, version);
+    }
+
+    /// How many update checks this process has started (the check at start counts once): a host's
+    /// tests check that none starts unless asked for.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn update_checks_started(&self) -> u32 {
+        updates_ui::checks_started(self)
+    }
+
     /// Help ▸ Check for Updates…: look now, and say so when GridCraft is up to date or the check fails.
     pub fn check_for_updates(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]

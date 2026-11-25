@@ -15,6 +15,10 @@ pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
     ..craft_update::suite::GRIDCRAFT
 };
 
+/// The update library, for a host that names its own app in [`SheetApp::set_update_app`].
+#[cfg(not(target_arch = "wasm32"))]
+pub use craft_update;
+
 pub mod backstage;
 mod border_preview;
 mod cell_pictures;
