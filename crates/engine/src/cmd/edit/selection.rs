@@ -96,6 +96,12 @@ pub(super) fn selection_move(s: &mut Session, p: &Json) -> Result<Json> {
         }
         t
     };
+    // Arrows stop at the end of a sized grid (StarSheets), along the way they move only: a whole
+    // column's moving end stays on the last row when Shift+Right widens it.
+    if to != from {
+        let inside = sheet.clamp_to_grid(to);
+        to = CellRef::new(if dr != 0 { inside.row } else { to.row }, if dc != 0 { inside.col } else { to.col });
+    }
     if let Some(m) = sheet.merge_at(to)
         && !extend
     {

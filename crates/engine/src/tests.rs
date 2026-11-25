@@ -735,6 +735,36 @@ fn insert_delete_rows_adjust() {
     assert_eq!(v(&s, "A1"), Value::Number(10.0));
 }
 
+/// StarSheets 0110: a sized grid (Google Sheets) shrinks when its last lines are deleted, grows
+/// with inserted and added lines and with cells written past its end, and keeps its size in .xlsx.
+#[test]
+fn a_sized_grid_shrinks_grows_and_round_trips() {
+    let mut s = s();
+    let size = |s: &Session| s.doc().map(|d| d.wb.active().map(|sh| (sh.row_count(), sh.col_count()))).ok().flatten();
+    assert_eq!(size(&s), Some((1000, 26)));
+    s.execute("home.deleteRows", json!({"rows": "51:2000"})).unwrap();
+    s.execute("home.deleteColumns", json!({"cols": "F:Z"})).unwrap();
+    assert_eq!(size(&s), Some((50, 5)));
+    assert!(s.execute("home.deleteColumns", json!({"cols": "A:E"})).is_err(), "one column is always left");
+    let wb = s.doc().unwrap().wb.clone();
+    let bytes = crate::io::save_bytes(&wb, "t.xlsx").unwrap();
+    let (back, _) = crate::io::open_bytes("t.xlsx", &bytes).unwrap();
+    assert_eq!(back.active().map(|sh| (sh.grid_rows, sh.grid_cols)), Some((Some(50), Some(5))));
+    s.execute("sheet.addRows", json!({"count": 10})).unwrap();
+    s.execute("home.insertColumns", json!({"cols": "B:B"})).unwrap();
+    assert_eq!(size(&s), Some((60, 6)));
+    s.execute("cell.set", json!({"cell": "J70", "input": "1"})).unwrap();
+    assert_eq!(size(&s), Some((70, 10)));
+    for _ in 0..3 {
+        s.execute("edit.undo", json!({})).unwrap();
+    }
+    assert_eq!(size(&s), Some((50, 5)));
+    // Ctrl+Down stops on the last row.
+    s.execute("selection.set", json!({"range": "A1"})).unwrap();
+    s.execute("selection.move", json!({"dr": 1, "jump": true})).unwrap();
+    assert_eq!(s.doc().unwrap().selection.active, CellRef::new(49, 0));
+}
+
 #[test]
 fn deleting_a_multi_area_row_selection_removes_every_area_and_undoes_once() {
     let mut s = s();

@@ -191,6 +191,14 @@ pub struct Sheet {
     /// tables). Goes away with the sheet; not in JSON.
     #[serde(skip)]
     pub preserved: Option<Arc<crate::preserved::Preserved>>,
+    /// StarSheets: the sheet's grid size in rows and columns, as in Google Sheets, where a sheet
+    /// has as many rows and columns as it shows (new sheets 1000 × 26; deleting the last rows makes
+    /// it smaller; "Add more rows" makes it bigger). `None` is Excel's full grid. Saved in a
+    /// worksheet `extLst` extension Excel skips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_rows: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_cols: Option<u32>,
 }
 
 fn yes() -> bool {
@@ -204,6 +212,9 @@ pub const DEFAULT_ROW_HEIGHT: f32 = 20.0;
 /// apart from DEFAULT_* because those mean "the file's default" to the xlsx reader and writer.
 pub const NEW_SHEET_COL_WIDTH: f32 = 100.0;
 pub const NEW_SHEET_ROW_HEIGHT: f32 = 21.0;
+/// StarSheets: Google Sheets' grid size for a new sheet.
+pub const NEW_SHEET_ROWS: u32 = 1000;
+pub const NEW_SHEET_COLS: u32 = 26;
 
 /// Column width (points) → characters of the default font's digit width (7 px), without the
 /// cell padding: the value the Column Width dialog shows.
@@ -217,7 +228,32 @@ impl Sheet {
         let mut sh = Sheet::new(name);
         sh.default_col_width = NEW_SHEET_COL_WIDTH;
         sh.default_row_height = NEW_SHEET_ROW_HEIGHT;
+        sh.grid_rows = Some(NEW_SHEET_ROWS);
+        sh.grid_cols = Some(NEW_SHEET_COLS);
         sh
+    }
+
+    /// How many rows the sheet has: its grid size, or Excel's full grid.
+    pub fn row_count(&self) -> u32 {
+        self.grid_rows.map_or(gridcraft_core::MAX_ROWS, |n| n.clamp(1, gridcraft_core::MAX_ROWS))
+    }
+    /// How many columns the sheet has (see [`Sheet::row_count`]).
+    pub fn col_count(&self) -> u32 {
+        self.grid_cols.map_or(gridcraft_core::MAX_COLS, |n| n.clamp(1, gridcraft_core::MAX_COLS))
+    }
+    /// `c` moved inside the sheet's grid.
+    pub fn clamp_to_grid(&self, c: CellRef) -> CellRef {
+        CellRef::new(c.row.min(self.row_count() - 1), c.col.min(self.col_count() - 1))
+    }
+    /// Grows a sized grid so it holds `r` (data written past its end, as Google does). Excel's
+    /// full grid is left alone.
+    pub fn grow_grid_to(&mut self, r: RangeRef) {
+        if let Some(n) = self.grid_rows.as_mut() {
+            *n = (*n).max(r.end.row.saturating_add(1)).min(gridcraft_core::MAX_ROWS);
+        }
+        if let Some(n) = self.grid_cols.as_mut() {
+            *n = (*n).max(r.end.col.saturating_add(1)).min(gridcraft_core::MAX_COLS);
+        }
     }
 
     pub fn new(name: impl Into<String>) -> Sheet {
@@ -268,6 +304,8 @@ impl Sheet {
             view_top_left: CellRef::default(),
             view: SheetViewMode::Normal,
             preserved: None,
+            grid_rows: None,
+            grid_cols: None,
         }
     }
 

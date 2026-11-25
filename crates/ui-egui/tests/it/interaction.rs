@@ -16,6 +16,7 @@ fn harness(session: Session) -> egui_kittest::Harness<'static, SheetApp> {
 fn blank() -> Session {
     let mut s = Session::new();
     s.new_workbook();
+    crate::support::full_grid(&mut s);
     s
 }
 

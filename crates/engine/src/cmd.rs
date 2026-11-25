@@ -394,6 +394,35 @@ fn wall_clock() -> std::time::Duration {
     std::time::SystemTime::UNIX_EPOCH.elapsed().unwrap_or_default()
 }
 
+/// A sized grid (`Sheet::grid_rows`, StarSheets) grows to hold cells written past its end, as
+/// Google Sheets' grid does when a paste or fill runs over it. A structural edit (cells shifted
+/// down or right) is checked against the whole used range.
+fn grow_sized_grids(wb: &mut Workbook, changed: &[Key], structural: bool) {
+    let mut far: std::collections::BTreeMap<usize, RangeRef> = std::collections::BTreeMap::new();
+    for (si, c) in changed {
+        let Some(sh) = wb.sheet(*si) else { continue };
+        if (sh.grid_rows.is_some() || sh.grid_cols.is_some()) && (c.row >= sh.row_count() || c.col >= sh.col_count()) {
+            let e = far.entry(*si).or_insert_with(|| RangeRef::new(*c, *c));
+            *e = e.union(&RangeRef::new(*c, *c));
+        }
+    }
+    if structural {
+        for (si, sh) in wb.sheets.iter().enumerate() {
+            if (sh.grid_rows.is_some() || sh.grid_cols.is_some())
+                && let Some(u) = sh.cells.used_range()
+                && (u.end.row >= sh.row_count() || u.end.col >= sh.col_count())
+            {
+                far.insert(si, far.get(&si).map_or(u, |r| r.union(&u)));
+            }
+        }
+    }
+    for (si, r) in far {
+        if let Some(sh) = wb.sheet_mut(si) {
+            sh.grow_grid_to(r);
+        }
+    }
+}
+
 pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>) -> Result<R> {
     // `GRIDCRAFT_PROFILE` timing, never on wasm where the clock traps. `elapsed` on the epoch
     // reads the wall clock without the (disallowed) `now`.
@@ -415,6 +444,7 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
     // Equations whose source changed (or that arrived without a layout, as from a paste) are
     // laid out here, so painting only ever reads the cache.
     wb.refresh_equations();
+    grow_sized_grids(&mut wb, &changed, structural);
     if !protection_checked {
         check_protection(&d.wb, &wb, &d.unlocked_ranges)?;
     }

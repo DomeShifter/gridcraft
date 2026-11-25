@@ -39,3 +39,15 @@ pub fn services_harness(services: Services, steps: usize) -> Harness {
 pub fn app_harness(app: SheetApp, steps: usize) -> Harness {
     harness_with(builder().with_size(egui::vec2(1200.0, 800.0)), app, steps)
 }
+
+/// Gives every sheet of `s`'s workbook Excel's full grid: for tests of moves to the end of the
+/// sheet (a new workbook's sheets have a sized grid, StarSheets 0110).
+pub fn full_grid(s: &mut Session) {
+    if let Some(d) = s.active_mut() {
+        for sh in std::sync::Arc::make_mut(&mut d.wb).sheets.iter_mut() {
+            let sh = std::sync::Arc::make_mut(sh);
+            sh.grid_rows = None;
+            sh.grid_cols = None;
+        }
+    }
+}

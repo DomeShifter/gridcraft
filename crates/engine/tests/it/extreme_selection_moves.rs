@@ -1,4 +1,8 @@
-use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
+use gridcraft_core::CellRef;
+
+// A new workbook's sheets have Google Sheets' sized grid (StarSheets 0110): moves stop at its end.
+const MAX_ROWS: u32 = 1000;
+const MAX_COLS: u32 = 26;
 use gridcraft_engine::Session;
 use serde_json::json;
 

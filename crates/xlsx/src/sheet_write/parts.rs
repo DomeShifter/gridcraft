@@ -130,6 +130,25 @@ pub(super) fn filter_views_ext(sheet: &Sheet, out: &mut Out) -> String {
     s
 }
 
+/// StarSheets' worksheet extension for the grid size (`Sheet::grid_rows` / `grid_cols`): Google
+/// Sheets' sheets have as many rows and columns as they show, Excel's always have its full grid.
+/// Excel skips the `ext` (see [`FILTER_VIEWS_EXT_URI`]) and shows its full grid; `<dimension>`
+/// stays the used range, as the format defines it.
+pub const GRID_SIZE_EXT_URI: &str = "{3E8B1F62-9C4D-4A7E-B5D2-6F0A1C3E5B74}";
+pub const GRID_SIZE_NS: &str = "urn:gridcraft:gridsize:1";
+
+pub(super) fn grid_size_ext(sheet: &Sheet) -> String {
+    let mut s = format!("<ext uri=\"{GRID_SIZE_EXT_URI}\" xmlns:gc=\"{GRID_SIZE_NS}\"><gc:gridSize");
+    if sheet.grid_rows.is_some() {
+        let _ = write!(s, " rows=\"{}\"", sheet.row_count());
+    }
+    if sheet.grid_cols.is_some() {
+        let _ = write!(s, " cols=\"{}\"", sheet.col_count());
+    }
+    s.push_str("/></ext>");
+    s
+}
+
 pub(super) fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, out: &mut Out) -> String {
     let mut s =
         format!("{XML_DECL}<table xmlns=\"{NS_MAIN}\" id=\"{id}\" name=\"{0}\" displayName=\"{0}\" ref=\"{1}\"", esc_attr(name), t.range.a1());

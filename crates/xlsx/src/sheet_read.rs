@@ -869,6 +869,17 @@ fn read_ext(cx: &mut Ctx<'_>, e: &El, sheet: &mut Sheet) {
                         }
                     }
                 }
+                // StarSheets' grid size (sheet_write/parts.rs `grid_size_ext`): never smaller
+                // than the cells the file holds, so nothing read is out of sight.
+                "gridSize" => {
+                    let used = sheet.cells.used_range();
+                    if let Some(n) = c.attr_u32("rows").filter(|n| *n > 0) {
+                        sheet.grid_rows = Some(n.max(used.map_or(0, |u| u.end.row.saturating_add(1))).min(MAX_ROWS));
+                    }
+                    if let Some(n) = c.attr_u32("cols").filter(|n| *n > 0) {
+                        sheet.grid_cols = Some(n.max(used.map_or(0, |u| u.end.col.saturating_add(1))).min(MAX_COLS));
+                    }
+                }
                 // GridCraft's filter views (sheet_write/parts.rs `filter_views_ext`).
                 "filterViews" => {
                     for v in c.kids("filterView") {

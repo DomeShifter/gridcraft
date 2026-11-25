@@ -52,6 +52,20 @@ pub fn specs() -> Vec<CommandSpec> {
             p,
             Axis::Cols
         )),
+        cmd!(
+            "sheet.addRows",
+            "Add Rows at the Bottom",
+            [],
+            None,
+            "{sheet?, count}: grows a sized grid (Google Sheets' \"Add N more rows at the bottom\")",
+            has_doc,
+            |s, p| add_lines(s, p, Axis::Rows)
+        ),
+        cmd!("sheet.addColumns", "Add Columns at the Right", [], None, "{sheet?, count}: grows a sized grid", has_doc, |s, p| add_lines(
+            s,
+            p,
+            Axis::Cols
+        )),
         cmd!("sheet.moveColumns", "Move Columns", [], None, "{cols?: \"B:C\", before: zero-based column index}", has_doc, move_columns),
         cmd!("sheet.moveRows", "Move Rows", [], None, "{rows?: \"2:3\", before: zero-based row index}", has_doc, move_rows),
         cmd!("home.insertCells", "Insert Cells…", ["Home", "Cells", "Insert"], None, "{range?, shift: right|down|row|column}", has_doc, insert_cells),
@@ -324,6 +338,13 @@ fn insert_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
             shift_sheet_features(sh, axis, at, count, true);
             // New lines take the format of the line before (Excel's "Format Same As Above").
             inherit_line_format(sh, axis, at, count);
+            // A sized grid (Google Sheets) gets longer; Excel's full grid pushes lines off its end.
+            let grid = if axis == Axis::Rows { &mut sh.grid_rows } else { &mut sh.grid_cols };
+            if let Some(n) = grid.as_mut()
+                && at < *n
+            {
+                *n = n.saturating_add(count).min(limit);
+            }
         }
         rewrite(cx, &name, &Edit::Insert { axis, at, count })?;
         cx.structural = true;
@@ -372,9 +393,32 @@ fn delete_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
         check_lines_protection(s, p, axis, at, count, false)?;
     }
     let sheet = target_sheet(s, p)?;
+    // A sized grid (Google Sheets) gets shorter, but keeps one line.
+    let full = if axis == Axis::Rows { MAX_ROWS } else { MAX_COLS };
+    let resize = match s.doc()?.wb.sheet(sheet) {
+        Some(sh) => {
+            let (sized, n) = if axis == Axis::Rows { (sh.grid_rows.is_some(), sh.row_count()) } else { (sh.grid_cols.is_some(), sh.col_count()) };
+            // Excel's full grid becomes a sized one when the delete reaches its end: the lines
+            // before what was deleted are what is left (a smaller sheet, as in Google Sheets).
+            let reaches_end = areas.iter().any(|&(at, count)| at as u64 + count as u64 >= full as u64);
+            match shrink_grid(n, &areas) {
+                None if sized => {
+                    let what = if axis == Axis::Rows { "rows" } else { "columns" };
+                    return Err(EngineError::Other(format!("You can't delete all the {what} on the sheet.")));
+                }
+                left if sized || reaches_end => left,
+                _ => None,
+            }
+        }
+        None => None,
+    };
     let out = edit(s, |cx| {
         let name = cx.wb.sheet(sheet).map(|s| s.name.clone()).unwrap_or_default();
         cx.protection_checked = true;
+        if let Some(left) = resize {
+            let sh = cx.sheet_mut(sheet)?;
+            *(if axis == Axis::Rows { &mut sh.grid_rows } else { &mut sh.grid_cols }) = Some(left);
+        }
         // Last area first, so the earlier ones keep their positions.
         for (at, count) in areas {
             {
@@ -397,6 +441,35 @@ fn delete_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
     })?;
     cancel_copy_mode(s);
     Ok(out)
+}
+
+/// The grid size left after deleting `areas` (first line, count) from a grid of `n` lines, or
+/// `None` when nothing would be left.
+fn shrink_grid(n: u32, areas: &[(u32, u32)]) -> Option<u32> {
+    let gone: u64 = areas.iter().map(|&(at, count)| (at as u64 + count as u64).min(n as u64).saturating_sub(at as u64)).sum();
+    let left = (n as u64).saturating_sub(gone) as u32;
+    (left > 0).then_some(left)
+}
+
+/// `sheet.addRows` / `sheet.addColumns`: Google Sheets' "Add N more rows at the bottom". Only a
+/// sized grid grows; Excel's full grid already has every line.
+fn add_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
+    let count = u32_param(p, "count").ok_or_else(|| bad("count", "the number of lines to add"))?;
+    if count == 0 {
+        return Err(bad("count", "add at least one"));
+    }
+    let sheet = target_sheet(s, p)?;
+    if s.doc()?.wb.protected_structure {
+        return Err(EngineError::Other("The workbook is protected and cannot be changed.".into()));
+    }
+    edit(s, |cx| {
+        cx.protection_checked = true;
+        let sh = cx.sheet_mut(sheet)?;
+        let (grid, full) = if axis == Axis::Rows { (&mut sh.grid_rows, MAX_ROWS) } else { (&mut sh.grid_cols, MAX_COLS) };
+        let Some(n) = grid.as_mut() else { return Ok(json!({"count": full})) };
+        *n = n.saturating_add(count).min(full);
+        Ok(json!({"count": *n}))
+    })
 }
 
 /// Reorders a contiguous block of whole columns without replacing the destination columns.

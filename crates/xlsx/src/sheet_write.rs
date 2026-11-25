@@ -315,7 +315,8 @@ fn write_sheet_extensions(s: &mut String, sheet: &Sheet, prio: &[u32], out: &mut
         .iter()
         .filter(|v| !v.ranges.is_empty() && (v.multiple || v.display != DropdownDisplay::Arrow || !v.item_colors.is_empty()))
         .collect();
-    let any = !solid_bars.is_empty() || !sheet.sparklines.is_empty() || !dropdowns.is_empty() || !sheet.filter_views.is_empty();
+    let sized = sheet.grid_rows.is_some() || sheet.grid_cols.is_some();
+    let any = !solid_bars.is_empty() || !sheet.sparklines.is_empty() || !dropdowns.is_empty() || !sheet.filter_views.is_empty() || sized;
     if any {
         s.push_str("<extLst>");
     }
@@ -359,6 +360,9 @@ fn write_sheet_extensions(s: &mut String, sheet: &Sheet, prio: &[u32], out: &mut
     }
     if !sheet.filter_views.is_empty() {
         s.push_str(&parts::filter_views_ext(sheet, out));
+    }
+    if sized {
+        s.push_str(&parts::grid_size_ext(sheet));
     }
     if any {
         s.push_str("</extLst>");

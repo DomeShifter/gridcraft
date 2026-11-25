@@ -161,12 +161,13 @@ pub fn jump(sheet: &Sheet, from: CellRef, dr: i64, dc: i64) -> CellRef {
         return from;
     }
     let filled = |c: CellRef| sheet.value_ref(c).is_some_and(|v| !v.is_empty());
-    let Some(mut cur) = from.offset(dr, dc) else { return from };
+    // A sized grid (StarSheets) ends at its last row and column.
+    let Some(mut cur) = from.offset(dr, dc).filter(|c| c.row < sheet.row_count() && c.col < sheet.col_count()) else { return from };
     let here = filled(from);
     let next = filled(cur);
     if here && next {
         // Move to the last filled cell of the run.
-        while let Some(n) = cur.offset(dr, dc) {
+        while let Some(n) = cur.offset(dr, dc).filter(|c| c.row < sheet.row_count() && c.col < sheet.col_count()) {
             if !filled(n) {
                 break;
             }
@@ -192,14 +193,14 @@ pub fn jump(sheet: &Sheet, from: CellRef, dr: i64, dc: i64) -> CellRef {
         };
         if beyond {
             let r = if dr > 0 {
-                MAX_ROWS - 1
+                sheet.row_count() - 1
             } else if dr < 0 {
                 0
             } else {
                 cur.row
             };
             let c = if dc > 0 {
-                MAX_COLS - 1
+                sheet.col_count() - 1
             } else if dc < 0 {
                 0
             } else {

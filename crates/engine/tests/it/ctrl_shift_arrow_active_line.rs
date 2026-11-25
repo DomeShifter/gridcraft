@@ -25,8 +25,9 @@ fn ctrl_shift_down_after_ctrl_shift_right_follows_the_active_column() {
     s.execute("selection.set", json!({"cell": "A2"})).unwrap();
     assert_eq!(ctrl_shift(&mut s, 0, 1), "A2:K2");
     assert_eq!(ctrl_shift(&mut s, 1, 0), "A2:K13", "column A's data ends on row 13; column K's ends on row 2");
-    // From the end of column A's data the next press runs to the sheet's last row.
-    assert_eq!(ctrl_shift(&mut s, 1, 0), "A2:K1048576");
+    // From the end of column A's data the next press runs to the sheet's last row (a new sheet
+    // has 1000, StarSheets 0110).
+    assert_eq!(ctrl_shift(&mut s, 1, 0), "A2:K1000");
 }
 
 #[test]
@@ -43,7 +44,7 @@ fn ctrl_shift_down_after_ctrl_shift_left_follows_the_active_column() {
     let mut s = table();
     s.execute("selection.set", json!({"cell": "K2"})).unwrap();
     assert_eq!(ctrl_shift(&mut s, 0, -1), "A2:K2");
-    assert_eq!(ctrl_shift(&mut s, 1, 0), "A2:K1048576");
+    assert_eq!(ctrl_shift(&mut s, 1, 0), "A2:K1000");
 }
 
 #[test]
@@ -52,5 +53,5 @@ fn ctrl_shift_right_after_ctrl_shift_up_follows_the_active_row() {
     let mut s = table();
     s.execute("selection.set", json!({"cell": "A13"})).unwrap();
     assert_eq!(ctrl_shift(&mut s, -1, 0), "A2:A13");
-    assert_eq!(ctrl_shift(&mut s, 0, 1), "2:13", "row 13's data ends in column A, so the rows extend to the last column");
+    assert_eq!(ctrl_shift(&mut s, 0, 1), "A2:Z13", "row 13's data ends in column A, so the rows extend to the last column (Z: StarSheets 0110)");
 }

@@ -154,6 +154,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
             max_y = if pg.rows_complete { (ey as f32 - g.cells.height() / g.z).max(0.0) } else { 1.0e9 };
         }
     }
+    (max_x, max_y) = sized_scroll_limits(sh, paper, (max_x, max_y), || make_geo(app, view.scroll));
     view.scroll.x = view.scroll.x.min(max_x);
     view.scroll.y = view.scroll.y.min(max_y);
     let mut geo = make_geo(app, view.scroll);
@@ -237,6 +238,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         crate::paper_view::paint_rulers(app, &painter, rect, &geo, &t);
     }
     show_grid_interactions(app, ui, &resp, &geo, sh, &wb);
+    add_rows_bar(app, ui, &geo, sh);
     let track_x = vertical_scroll_track(available, rect, rtl);
     // The track starts below the column headings and frozen rows; the bar's column beside them
     // takes its colour too instead of showing a light square in dark mode.
@@ -467,6 +469,63 @@ fn paint_panes(input: PanesInput<'_>, cf: &mut CfCache) -> Vec<PaneQuad> {
     quads
 }
 
+/// Screen room below a sized grid's last row, for the Add rows bar (StarSheets).
+const ADD_ROWS_ROOM: f32 = 64.0;
+/// Screen room right of a sized grid's last column.
+const GRID_END_ROOM: f32 = 24.0;
+
+/// How far a sized grid (StarSheets) scrolls: to its last row and column, with room below for the
+/// Add rows bar. `full` is the full grid's limits, kept for an axis that isn't sized.
+fn sized_scroll_limits(sh: &Sheet, paper: bool, full: (f32, f32), geo: impl FnOnce() -> Geo) -> (f32, f32) {
+    // Page Layout's pages have their own end.
+    if paper || (sh.grid_rows.is_none() && sh.grid_cols.is_none()) {
+        return full;
+    }
+    let g = geo();
+    let x = if sh.grid_cols.is_some() {
+        (g.scroll_left_of(sh, sh.col_count()) + (GRID_END_ROOM - (g.cells.width() - g.frozen_w)) / g.z).max(0.0)
+    } else {
+        full.0
+    };
+    let y = if sh.grid_rows.is_some() {
+        (g.scroll_top_of(sh, sh.row_count()) + (ADD_ROWS_ROOM - (g.cells.height() - g.frozen_h)) / g.z).max(0.0)
+    } else {
+        full.1
+    };
+    (x, y)
+}
+
+/// Google Sheets' "Add [1000] more rows at the bottom" under a sized grid's last row (StarSheets).
+fn add_rows_bar(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet) {
+    if sh.grid_rows.is_none() || geo.paper.is_some() || app.session.read_only {
+        return;
+    }
+    let bottom = geo.y_end(sh, sh.row_count() - 1);
+    if bottom < geo.cells.top() + geo.frozen_h || bottom + 40.0 > geo.cells.bottom() {
+        return;
+    }
+    let rect = geo.mirror_rect(Rect::from_min_size(pos2(geo.cells.left() + 12.0, bottom + 14.0), vec2(460.0, 28.0)));
+    let lang = app.ui.language;
+    let id = egui::Id::unique("gridcraft.add_rows_count");
+    let mut text: String = ui.data(|d| d.get_temp(id)).unwrap_or_else(|| "1000".to_string());
+    let mut add = false;
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+        add = ui.button(lang.tr("Add")).clicked();
+        let field = ui.add(egui::TextEdit::singleline(&mut text).id(id.with("field")).desired_width(64.0));
+        ui.label(lang.tr("more rows at the bottom"));
+        add |= field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    });
+    text.retain(|c| c.is_ascii_digit());
+    text.truncate(7);
+    if add
+        && let Ok(count) = text.parse::<u32>()
+        && count > 0
+    {
+        app.run_or_alert("sheet.addRows", json!({ "count": count }));
+    }
+    ui.data_mut(|d| d.insert_temp(id, text));
+}
+
 /// The worksheet is painted virtually, so it needs its own scrollbar rather than a
 /// ScrollArea containing all million rows. Keep the scroll extent stable during a drag.
 fn vertical_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, sh: &Sheet, geo: &Geo, track_x: (f32, f32), limit: f32, t: &Tokens) {
@@ -480,8 +539,12 @@ fn vertical_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, sh: &Sheet, geo: &G
     }
     let visible = track.height() / geo.z;
     let scroll = app.view().scroll.y;
-    let last = geo.used.map(|r| r.end.row.saturating_add(10)).unwrap_or(100).clamp(100, MAX_ROWS - 1);
-    let content = geo.scroll_top_of(sh, last);
+    let content = if sh.grid_rows.is_some() {
+        geo.scroll_top_of(sh, sh.row_count()) + ADD_ROWS_ROOM / geo.z
+    } else {
+        let last = geo.used.map(|r| r.end.row.saturating_add(10)).unwrap_or(100).clamp(100, MAX_ROWS - 1);
+        geo.scroll_top_of(sh, last)
+    };
     let extent = (content - visible).max(scroll).max(0.0).min(limit);
     let id = ui.scope_id().with("vscroll");
     let resp = ui.interact(track, id, Sense::click_and_drag());
@@ -533,8 +596,12 @@ pub(crate) fn horizontal_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, track:
     let Some(sh) = wb.active() else { return };
     let visible = ((geo.cells.width() - geo.frozen_w) / geo.z).max(0.0);
     let scroll = app.view().scroll.x;
-    let last = geo.used.map(|r| r.end.col.saturating_add(10)).unwrap_or(26).clamp(26, MAX_COLS - 1);
-    let content = geo.scroll_left_of(sh, last);
+    let content = if sh.grid_cols.is_some() {
+        geo.scroll_left_of(sh, sh.col_count()) + GRID_END_ROOM / geo.z
+    } else {
+        let last = geo.used.map(|r| r.end.col.saturating_add(10)).unwrap_or(26).clamp(26, MAX_COLS - 1);
+        geo.scroll_left_of(sh, last)
+    };
     let extent = (content - visible).max(scroll).max(0.0);
     let id = ui.scope_id().with("hscroll");
     let resp = ui.interact(track, id, Sense::click_and_drag());

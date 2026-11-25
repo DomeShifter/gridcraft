@@ -18,6 +18,7 @@ const CTRL_SHIFT: Modifiers = Modifiers { shift: true, ..CTRL };
 fn harness() -> Harness {
     let mut s = Session::new();
     s.new_workbook();
+    crate::support::full_grid(&mut s);
     let down: Vec<Vec<i64>> = (1..=200).map(|r| vec![r]).collect();
     s.execute("range.setValues", json!({"range": "A1", "values": down})).unwrap();
     let across: Vec<i64> = (1..=100).collect();
