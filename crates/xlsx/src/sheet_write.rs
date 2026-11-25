@@ -23,6 +23,7 @@ mod parts;
 mod rules;
 
 pub(crate) use parts::password_attrs;
+pub(crate) use parts::GRID_SIZE_EXT_URI;
 use parts::{autofilter_xml, comments_xml, protected_ranges_xml, table_columns, table_name, table_xml, thread_ids, threaded_xml, vml_xml};
 use rules::{cf_rule_xml, solid_bar_id, validation_xml, x14_cfvo};
 

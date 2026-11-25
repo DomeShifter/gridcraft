@@ -245,6 +245,57 @@ impl Sheet {
     pub fn clamp_to_grid(&self, c: CellRef) -> CellRef {
         CellRef::new(c.row.min(self.row_count() - 1), c.col.min(self.col_count() - 1))
     }
+    /// The last row and column anything on the sheet sits in: cells and spilled values, merges,
+    /// notes, links, cell pictures, tables, filters, conditional formats, validations, sparklines
+    /// and the anchor cells of floating objects. Whole-column or whole-row ranges count only along
+    /// their other axis. `None` when the sheet is empty.
+    pub fn content_end(&self) -> Option<CellRef> {
+        let mut end: Option<CellRef> = None;
+        let mut put = |c: CellRef| {
+            end = Some(end.map_or(c, |e| CellRef::new(e.row.max(c.row), e.col.max(c.col))));
+        };
+        fn put_range(r: &RangeRef, put: &mut impl FnMut(CellRef)) {
+            let row = if r.is_full_cols() { 0 } else { r.end.row };
+            let col = if r.is_full_rows() { 0 } else { r.end.col };
+            put(CellRef::new(row, col));
+        }
+        if let Some(u) = self.used_range() {
+            put_range(&u, &mut put);
+        }
+        for r in self.merges.iter().chain(self.tables.iter().map(|t| &t.range)).chain(self.autofilter.iter().map(|a| &a.range)) {
+            put_range(r, &mut put);
+        }
+        for r in self.filter_views.iter().map(|v| &v.range) {
+            put_range(r, &mut put);
+        }
+        for r in self.cond_formats.iter().flat_map(|c| &c.ranges).chain(self.validations.iter().flat_map(|v| &v.ranges)) {
+            put_range(r, &mut put);
+        }
+        for c in self.comments.keys().chain(self.hyperlinks.keys()).chain(self.cell_pictures.keys()) {
+            put(*c);
+        }
+        for c in self.sparklines.iter().map(|s| s.cell) {
+            put(c);
+        }
+        let anchors = self.charts.iter().map(|c| &c.anchor).chain(self.images.iter().map(|i| &i.anchor)).chain(self.shapes.iter().map(|s| &s.anchor));
+        for a in anchors.chain(self.controls.iter().map(|c| &c.anchor)).chain(self.slicers.iter().map(|s| &s.anchor)) {
+            put(a.cell);
+        }
+        end
+    }
+    /// Grows a sized grid to hold everything on the sheet ([`Sheet::content_end`]), so nothing
+    /// is ever out of sight: done on every sheet that arrives from a file or another tab.
+    /// Returns whether it changed.
+    pub fn fit_grid_to_content(&mut self) -> bool {
+        let before = (self.grid_rows, self.grid_cols);
+        // A hostile or broken size is brought into range first.
+        self.grid_rows = self.grid_rows.map(|n| n.clamp(1, gridcraft_core::MAX_ROWS));
+        self.grid_cols = self.grid_cols.map(|n| n.clamp(1, gridcraft_core::MAX_COLS));
+        if let Some(end) = self.content_end() {
+            self.grow_grid_to(RangeRef::new(end, end));
+        }
+        (self.grid_rows, self.grid_cols) != before
+    }
     /// Grows a sized grid so it holds `r` (data written past its end, as Google does). Excel's
     /// full grid is left alone.
     pub fn grow_grid_to(&mut self, r: RangeRef) {

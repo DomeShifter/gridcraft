@@ -476,6 +476,13 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
     crate::array_formula::apply_legacy(&mut wb, legacy_formulas, functions);
     wb.styles = cx.styles;
     wb.phonetics = cx.phonetics;
+    // A sized grid (StarSheets) never hides what the file holds: notes, objects and the rest were
+    // read after the sheet's own part.
+    for sh in wb.sheets.iter_mut() {
+        if (sh.grid_rows.is_some() || sh.grid_cols.is_some()) && sh.content_end().is_some() {
+            std::sync::Arc::make_mut(sh).fit_grid_to_content();
+        }
+    }
     Ok((wb, cx.report))
 }
 

@@ -423,6 +423,24 @@ fn grow_sized_grids(wb: &mut Workbook, changed: &[Key], structural: bool) {
     }
 }
 
+/// A sized grid grows to hold what a formula spills past its end (`=SEQUENCE(2000)` on a
+/// 1000-row sheet), so the result is never hidden; Google Sheets shows #REF! there instead, but
+/// growing keeps one rule for everything a sheet holds (`Sheet::fit_grid_to_content`).
+fn grow_for_spills(wb: &mut Workbook) {
+    for i in 0..wb.sheets.len() {
+        let Some(sh) = wb.sheet(i) else { continue };
+        if sh.grid_rows.is_none() && sh.grid_cols.is_none() {
+            continue;
+        }
+        let far = sh.spill_ranges.values().fold(None::<RangeRef>, |acc, r| Some(acc.map_or(*r, |a| a.union(r))));
+        if let Some(r) = far.filter(|r| r.end.row >= sh.row_count() || r.end.col >= sh.col_count())
+            && let Some(sh) = wb.sheet_mut(i)
+        {
+            sh.grow_grid_to(r);
+        }
+    }
+}
+
 pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>) -> Result<R> {
     // `GRIDCRAFT_PROFILE` timing, never on wasm where the clock traps. `elapsed` on the epoch
     // reads the wall clock without the (disallowed) `now`.
@@ -476,6 +494,7 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
         d.calc.cells_changed(&mut wb, &changed);
     }
     controls::sync_linked_values(&mut wb);
+    grow_for_spills(&mut wb);
     if let Some(t0) = t0 {
         eprintln!("commit: + recalc {:?}", since(t0));
     }

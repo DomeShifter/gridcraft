@@ -11,6 +11,7 @@ mod controls_tests;
 mod csv_tests;
 mod dropdown_axis_roundtrip;
 mod filter_views_roundtrip;
+mod grid_size;
 mod encrypted_tests;
 mod equation_tests;
 mod fixtures;

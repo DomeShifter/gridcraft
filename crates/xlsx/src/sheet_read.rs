@@ -869,16 +869,12 @@ fn read_ext(cx: &mut Ctx<'_>, e: &El, sheet: &mut Sheet) {
                         }
                     }
                 }
-                // StarSheets' grid size (sheet_write/parts.rs `grid_size_ext`): never smaller
-                // than the cells the file holds, so nothing read is out of sight.
-                "gridSize" => {
-                    let used = sheet.cells.used_range();
-                    if let Some(n) = c.attr_u32("rows").filter(|n| *n > 0) {
-                        sheet.grid_rows = Some(n.max(used.map_or(0, |u| u.end.row.saturating_add(1))).min(MAX_ROWS));
-                    }
-                    if let Some(n) = c.attr_u32("cols").filter(|n| *n > 0) {
-                        sheet.grid_cols = Some(n.max(used.map_or(0, |u| u.end.col.saturating_add(1))).min(MAX_COLS));
-                    }
+                // StarSheets' grid size (sheet_write/parts.rs `grid_size_ext`), known by the
+                // extension's uri. Brought into range here; grown to hold everything the file has
+                // once the whole workbook is read (read.rs).
+                "gridSize" if ext.attr("uri") == Some(crate::sheet_write::GRID_SIZE_EXT_URI) => {
+                    sheet.grid_rows = c.attr_u32("rows").map(|n| n.clamp(1, MAX_ROWS));
+                    sheet.grid_cols = c.attr_u32("cols").map(|n| n.clamp(1, MAX_COLS));
                 }
                 // GridCraft's filter views (sheet_write/parts.rs `filter_views_ext`).
                 "filterViews" => {
