@@ -115,7 +115,32 @@ fn filter(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     if !keep_rows && !keep_cols {
         return Err(CellError::Value);
     }
-    let flags: Vec<bool> = inc.data.iter().map(truthy).collect::<R<_>>()?;
+    let mut flags: Vec<bool> = inc.data.iter().map(truthy).collect::<R<_>>()?;
+    // Google Sheets: FILTER(range, condition1, [condition2, …]) keeps what passes every
+    // condition. Excel: FILTER(array, include, [if_empty]). A third argument is a condition
+    // when it is an array shaped like the first one, or when more arguments follow it;
+    // otherwise it is Excel's if_empty.
+    let same_shape = |v: &Value| matches!(v, Value::Array(c) if c.rows == inc.rows && c.cols == inc.cols);
+    let mut if_empty = None;
+    for i in 2..args.len() {
+        let v = &arg(args, i)?.value;
+        if i == 2 && args.len() == 3 && !same_shape(v) {
+            if has(args, 2) {
+                if_empty = Some(v.clone());
+            }
+            break;
+        }
+        if let Value::Error(e) = v {
+            return Err(*e);
+        }
+        if !same_shape(v) {
+            return Err(CellError::Value);
+        }
+        for (f, x) in flags.iter_mut().zip(as_array(v).data.iter()) {
+            *f = truthy(x)? && *f;
+        }
+    }
+    let google = args.len() > 3 || (args.len() == 3 && if_empty.is_none() && has(args, 2));
     let grid = rows_of(&a);
     let out: Vec<Vec<Value>> = if keep_rows {
         grid.into_iter().zip(flags.iter()).filter(|(_, f)| **f).map(|(r, _)| r).collect()
@@ -123,10 +148,11 @@ fn filter(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
         grid.into_iter().map(|r| r.into_iter().zip(flags.iter()).filter(|(_, f)| **f).map(|(v, _)| v).collect::<Vec<_>>()).collect()
     };
     if out.is_empty() || out.iter().all(Vec::is_empty) {
-        if has(args, 2) {
-            return Ok(arg(args, 2)?.value.clone());
+        if let Some(v) = if_empty {
+            return Ok(v);
         }
-        return Err(CellError::Calc);
+        // Google answers "No matches are found in FILTER evaluation" with #N/A.
+        return Err(if google { CellError::NA } else { CellError::Calc });
     }
     from_rows(out, &Value::Empty)
 }
@@ -1175,11 +1201,11 @@ pub(crate) fn specs() -> Vec<FnSpec> {
         f!(
             "FILTER",
             2,
-            3,
+            VAR,
             Lookup,
             A,
-            "FILTER(array, include, [if_empty])",
-            "Keeps the rows or columns of an array whose include flag is TRUE.",
+            "FILTER(range, condition1, [condition2, …]) or FILTER(array, include, [if_empty])",
+            "Keeps the rows or columns of a range that pass every condition (Excel: whose include flag is TRUE).",
             filter
         ),
         f!(
@@ -1342,6 +1368,22 @@ mod tests {
         is_err(ev("FILTER", vec![rf(grid()), av(col(&[1.0, 0.0]))]), CellError::Value);
         let errinc = arr(vec![vec![nv(1.0)], vec![Value::Error(CellError::Div0)], vec![nv(1.0)]]);
         is_err(ev("FILTER", vec![rf(grid()), av(errinc)]), CellError::Div0);
+        // Google Sheets: FILTER(range, condition1, condition2, …) keeps rows passing all of them.
+        let c1 = || av(col(&[1.0, 1.0, 0.0]));
+        let c2 = || av(col(&[1.0, 0.0, 1.0]));
+        assert_eq!(rows_of(&ev("FILTER", vec![rf(grid()), c1(), c2()])), vec![vec![tv("b"), nv(2.0), nv(20.0)]]);
+        assert_eq!(rows_of(&ev("FILTER", vec![rf(grid()), c1(), c2(), c1()])).len(), 1);
+        let r = ev("FILTER", vec![rf(grid()), av(row(&[1.0, 1.0, 0.0])), av(row(&[0.0, 1.0, 1.0]))]);
+        assert_eq!(rows_of(&r), vec![vec![nv(2.0)], vec![nv(3.0)], vec![nv(1.0)]]);
+        // No row passes every condition: Google's #N/A ("No matches are found").
+        is_err(ev("FILTER", vec![rf(grid()), av(col(&[1.0, 0.0, 0.0])), c2(), c1()]), CellError::NA);
+        is_err(ev("FILTER", vec![rf(grid()), av(col(&[0.0, 1.0, 0.0])), c2()]), CellError::NA);
+        // Conditions must all match the range's shape; an error in one comes through.
+        is_err(ev("FILTER", vec![rf(grid()), c1(), av(col(&[1.0, 0.0])), c2()]), CellError::Value);
+        is_err(ev("FILTER", vec![rf(grid()), c1(), av(row(&[1.0, 0.0, 1.0])), c2()]), CellError::Value);
+        is_err(ev("FILTER", vec![rf(grid()), c1(), av(errinc), c2()]), CellError::Div0);
+        // A scalar third argument is still Excel's if_empty.
+        is_text(ev("FILTER", vec![rf(grid()), av(col(&[0.0, 0.0, 0.0])), t("none")]), "none");
     }
 
     #[test]
