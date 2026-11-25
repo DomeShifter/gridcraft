@@ -119,6 +119,9 @@ pub(crate) fn extract(html: &str, text: &str) -> Option<Clipboard> {
         Arc::make_mut(sh).cells.rebuild();
     }
     let sh = Arc::make_mut(wb.sheets.get_mut(p.sheet)?);
+    // Only the rules on the copied block matter, and no more than one paste adds.
+    sh.validations.retain(|dv| dv.ranges.iter().any(|x| x.intersects(&r)));
+    sh.validations.truncate(crate::cmd::edit::MAX_PASTE_VALIDATION_RULES);
     sh.spill.extend(p.spill.into_iter().filter(|(c, _)| r.contains(*c)));
     Some(Clipboard {
         wb: Arc::new(wb),

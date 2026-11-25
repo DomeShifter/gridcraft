@@ -402,6 +402,9 @@ const MAX_PASTE_LINK_CELLS: u64 = 1_048_576;
 /// Most validation ranges one paste adds (a rule covering part of a small block tiled over a huge
 /// selection makes one range per tile).
 const MAX_PASTE_VALIDATION_RANGES: usize = 100_000;
+/// Most validation rules one paste adds; rules past this many are left out. A real copy has a
+/// handful; clipboard data from elsewhere could list thousands, each costing a formula move.
+pub(crate) const MAX_PASTE_VALIDATION_RULES: usize = 1_000;
 
 /// How a validation paste lays the rules out: transposed or not, keeping the destination's rule under
 /// blank source cells, and leaving the rows a filter hides as they are.
@@ -503,6 +506,9 @@ fn paste_validations(
         let Some(first) = dv.ranges.first().map(|r| r.start) else { continue };
         if parts.is_empty() {
             continue;
+        }
+        if rules.len() >= MAX_PASTE_VALIDATION_RULES {
+            break;
         }
         let mut ranges = Vec::new();
         if parts.contains(&src) {

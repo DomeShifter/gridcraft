@@ -822,3 +822,48 @@ fn clipboard_data_for_other_text_or_damaged_is_ignored() {
     assert_eq!(t.execute("cell.get", json!({"cell": "B1"})).unwrap()["formula"], Json::Null);
     assert!(t.execute("edit.paste", json!({"text": text, "what": "formats"})).is_err());
 }
+
+/// `html` with its clipboard data (the JSON inside `data-gridcraft-clip`) changed by `edit`, as a
+/// hostile program could write it.
+fn with_clip_data(html: &str, edit: impl FnOnce(&mut Json)) -> String {
+    let key = "data-gridcraft-clip=\"";
+    let start = html.find(key).unwrap() + key.len();
+    let end = start + html[start..].find('"').unwrap();
+    let mut data: Json = serde_json::from_slice(&crate::io::base64_decode(&html[start..end]).unwrap()).unwrap();
+    edit(&mut data);
+    format!("{}{}{}", &html[..start], crate::io::base64_encode(&serde_json::to_vec(&data).unwrap()), &html[end..])
+}
+
+/// Clipboard data claiming an array of 2^60 × 2^60 values with none in it is refused as a whole
+/// (Array is read through Array::new): the paste falls back to the plain text, nothing panics,
+/// and a formula that walks the cells (BYROW sizes its buffer from the array's shape) is safe.
+#[test]
+fn clipboard_data_with_a_lying_array_shape_is_refused() {
+    let (_, text, html) = copied_for_another_window();
+    let huge = 1u64 << 60;
+    let hostile = with_clip_data(&html, |d| {
+        d["spill"] = json!([[{"row": 0, "col": 0}, {"t": "Array", "v": {"rows": huge, "cols": huge, "data": []}}]]);
+    });
+    let mut t = Session::new();
+    t.new_workbook();
+    t.execute("edit.paste", json!({"at": "A1", "text": text, "html": hostile})).unwrap();
+    assert!(t.clipboard.is_none(), "the data was not taken");
+    assert_eq!(t.execute("cell.get", json!({"cell": "B1"})).unwrap()["formula"], Json::Null, "pasted as text");
+    t.execute("cell.set", json!({"cell": "D1", "input": "=BYROW(A1:B2,LAMBDA(x,1))"})).unwrap();
+    assert_eq!(t.execute("cell.get", json!({"cell": "D1"})).unwrap()["value"], json!(1.0));
+}
+
+/// Clipboard data listing thousands of validation rules adds at most MAX_PASTE_VALIDATION_RULES.
+#[test]
+fn a_paste_adds_a_bounded_number_of_validation_rules() {
+    let (_, text, html) = copied_for_another_window();
+    let many = with_clip_data(&html, |d| {
+        let rule = d["wb"]["sheets"][0]["validations"][0].clone();
+        d["wb"]["sheets"][0]["validations"] = Json::Array(vec![rule; 3_000]);
+    });
+    let mut t = Session::new();
+    t.new_workbook();
+    t.execute("edit.paste", json!({"at": "A1", "text": text, "html": many})).unwrap();
+    let n = t.doc().unwrap().wb.active().unwrap().validations.len();
+    assert!((1..=super::MAX_PASTE_VALIDATION_RULES).contains(&n), "{n} rules");
+}

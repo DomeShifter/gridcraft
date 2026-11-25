@@ -103,11 +103,31 @@ impl fmt::Display for CellError {
 }
 
 /// A 2-D array of values (row-major). Always at least 1×1.
+///
+/// Read from data (a file, the clipboard) through [`Array::new`], so a stored shape can never
+/// disagree with the values it holds: code sizes buffers from `rows` and `cols`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "ArrayParts")]
 pub struct Array {
     pub rows: usize,
     pub cols: usize,
     pub data: Vec<Value>,
+}
+
+/// An [`Array`] as stored, before its shape is checked.
+#[derive(Deserialize)]
+struct ArrayParts {
+    rows: usize,
+    cols: usize,
+    data: Vec<Value>,
+}
+
+impl TryFrom<ArrayParts> for Array {
+    type Error = String;
+    fn try_from(p: ArrayParts) -> Result<Array, String> {
+        let (rows, cols, len) = (p.rows, p.cols, p.data.len());
+        Array::new(rows, cols, p.data).ok_or_else(|| format!("an array of {rows}×{cols} can't hold {len} values"))
+    }
 }
 
 impl Array {
@@ -487,6 +507,20 @@ pub fn sci_text(n: f64, sig: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Stored arrays go through Array::new: a shape that doesn't match the values is refused,
+    /// so nothing sizes a buffer from a lying `rows` × `cols` (2^60 × 2^60 with no values).
+    #[test]
+    fn a_stored_array_must_hold_its_shape() {
+        let huge = 1u64 << 60;
+        let lying = serde_json::json!({"t": "Array", "v": {"rows": huge, "cols": huge, "data": []}});
+        assert!(serde_json::from_value::<Value>(lying).is_err());
+        let empty = serde_json::json!({"t": "Array", "v": {"rows": 0, "cols": 0, "data": []}});
+        assert!(serde_json::from_value::<Value>(empty).is_err());
+        let ok = Value::Array(std::sync::Arc::new(Array::row(vec![Value::Number(1.0), Value::Number(2.0)])));
+        let back: Value = serde_json::from_value(serde_json::to_value(&ok).unwrap()).unwrap();
+        assert_eq!(back, ok);
+    }
 
     #[test]
     fn number_text() {

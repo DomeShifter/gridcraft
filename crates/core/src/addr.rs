@@ -122,10 +122,28 @@ pub fn letters_to_col(s: &str) -> Option<u32> {
 }
 
 /// A rectangular block of cells, inclusive on both ends. Always normalised (`start <= end`).
+///
+/// Read from data (a file, the clipboard) through [`RangeRef::new`] and kept on the sheet grid,
+/// so `height`, `width` and `count` can't underflow or describe more than the grid.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(from = "RangeParts")]
 pub struct RangeRef {
     pub start: CellRef,
     pub end: CellRef,
+}
+
+/// A [`RangeRef`] as stored, before it is normalised.
+#[derive(Deserialize)]
+struct RangeParts {
+    start: CellRef,
+    end: CellRef,
+}
+
+impl From<RangeParts> for RangeRef {
+    fn from(p: RangeParts) -> RangeRef {
+        let on_grid = |c: CellRef| CellRef::new(c.row.min(MAX_ROWS - 1), c.col.min(MAX_COLS - 1));
+        RangeRef::new(on_grid(p.start), on_grid(p.end))
+    }
 }
 
 impl RangeRef {
@@ -351,6 +369,15 @@ pub fn split_areas(reference: &str) -> Vec<&str> {
 
 #[cfg(test)]
 mod tests {
+    /// Stored ranges are normalised and kept on the grid, so height/width/count can't underflow.
+    #[test]
+    fn a_stored_range_is_normalised_onto_the_grid() {
+        use super::{CellRef, MAX_COLS, RangeRef};
+        let r: RangeRef = serde_json::from_value(serde_json::json!({"start": {"row": 9, "col": 4}, "end": {"row": 2, "col": u32::MAX}})).unwrap();
+        assert_eq!(r, RangeRef::new(CellRef::new(2, 4), CellRef::new(9, MAX_COLS - 1)));
+        assert_eq!((r.height(), r.width()), (8, MAX_COLS - 4));
+    }
+
     #[test]
     fn tidy_merges_and_drops_covered_areas() {
         let mut r: Vec<RangeRef> = ["A2", "A2:A28", "A2:B2", "B2:B28"].iter().map(|a| RangeRef::parse(a).unwrap()).collect();
