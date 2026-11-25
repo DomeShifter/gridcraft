@@ -119,6 +119,23 @@ fn marginoferror(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     }
 }
 
+/// SPARKLINE and IMAGE (StarSheets 0102): the cell holds no value (empty text, as in Google
+/// Sheets); the grid draws the chart or the picture from the formula's arguments.
+fn sparkline(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    match &arg(a, 0)?.value {
+        Value::Error(e) => Err(*e),
+        _ => Ok(Value::text("")),
+    }
+}
+
+fn image(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    match scalar(arg(a, 0)?) {
+        Value::Text(t) if !t.trim().is_empty() => Ok(Value::text("")),
+        Value::Error(e) => Err(e),
+        _ => Err(CellError::Value),
+    }
+}
+
 fn parser_identity(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     google::parser_identity(&scalar(arg(a, 0)?))
 }
@@ -212,6 +229,26 @@ pub(crate) fn specs() -> Vec<FnSpec> {
             "The random sampling error of a range of values at a confidence level (Google Sheets).",
             marginoferror
         ),
+        f!(
+            "SPARKLINE",
+            1,
+            2,
+            Lookup,
+            A,
+            "SPARKLINE(data, [options])",
+            "A small chart inside the cell: line, bar, column or win/loss; options is a two-column range or array such as {\"charttype\",\"column\";\"color\",\"red\"} (Google Sheets).",
+            sparkline
+        ),
+        f!(
+            "IMAGE",
+            1,
+            4,
+            Lookup,
+            A,
+            "IMAGE(url, [mode], [height], [width])",
+            "Shows the picture at a web address inside the cell; mode 1 fits it (default), 2 stretches it, 3 keeps its own size, 4 uses height and width in pixels (Google Sheets).",
+            image
+        ),
         f!("TO_DATE", 1, 1, Text, S, "TO_DATE(value)", "A number as a date; other values unchanged (Google Sheets).", parser_identity),
         f!("TO_DOLLARS", 1, 1, Text, S, "TO_DOLLARS(value)", "A number as a dollar value; other values unchanged (Google Sheets).", parser_identity),
         f!("TO_PERCENT", 1, 1, Text, S, "TO_PERCENT(value)", "A number as a percentage; other values unchanged (Google Sheets).", parser_identity),
@@ -269,6 +306,16 @@ mod tests {
         assert_eq!(ev("JOIN", vec![Arg::val(Value::text("-")), Arg::reference(col)]), Value::text("1-2"));
         assert_eq!(ev("DIVIDE", vec![Arg::val(Value::number(1.0)), Arg::val(Value::Empty)]), Value::Error(CellError::Div0));
         assert_eq!(ev("REGEXMATCH", vec![Arg::val(Value::number(1.0)), Arg::val(Value::text("1"))]), Value::Error(CellError::Value));
+    }
+
+    /// SPARKLINE and IMAGE (StarSheets 0102): no value in the cell; the grid draws them.
+    #[test]
+    fn sparkline_and_image_leave_the_cell_empty() {
+        let col = Value::from(Array::column(vec![Value::number(1.0), Value::number(3.0)]));
+        assert_eq!(ev("SPARKLINE", vec![Arg::reference(col)]), Value::text(""));
+        assert_eq!(ev("SPARKLINE", vec![Arg::val(Value::Error(CellError::Ref))]), Value::Error(CellError::Ref));
+        assert_eq!(ev("IMAGE", vec![Arg::val(Value::text("https://example.org/a.png"))]), Value::text(""));
+        assert_eq!(ev("IMAGE", vec![Arg::val(Value::number(1.0))]), Value::Error(CellError::Value));
     }
 
     /// Batch 2 (StarSheets 0091): registered, and the ones worked out here rather than in

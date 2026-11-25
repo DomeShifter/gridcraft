@@ -36,6 +36,7 @@ pub mod editor;
 pub mod equation;
 mod floating_pictures;
 pub mod fonts;
+pub mod formula_graphics;
 
 /// A host's spell check for text typed in a cell: words it doesn't know are underlined in red
 /// while editing (never in formulas, and not the word still being typed).

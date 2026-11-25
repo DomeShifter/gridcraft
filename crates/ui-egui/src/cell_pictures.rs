@@ -136,6 +136,12 @@ fn fitted_rect_aligned(cell: Rect, size: [usize; 2], align: &Alignment) -> Optio
 
 /// Draws a cached cell picture fitted inside the cell and clipped to it, or paints the picture fallback icon when no texture is available.
 pub(crate) fn paint(painter: &Painter, cell: Rect, picture: &Arc<CellPicture>, align: &Alignment) {
+    paint_as(painter, cell, picture, align, false);
+}
+
+/// [`paint`], or with `stretch` filling the whole cell whatever the picture's shape (IMAGE mode
+/// 2, StarSheets 0102).
+pub(crate) fn paint_as(painter: &Painter, cell: Rect, picture: &Arc<CellPicture>, align: &Alignment, stretch: bool) {
     if cell.width() <= 0.0 || cell.height() <= 0.0 || !cell.intersects(painter.clip_rect()) {
         return;
     }
@@ -145,7 +151,8 @@ pub(crate) fn paint(painter: &Painter, cell: Rect, picture: &Arc<CellPicture>, a
     let texture = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).texture(painter.ctx(), picture);
     let painter = painter.with_clip_rect(cell.intersect(painter.clip_rect()));
     if let Some(texture) = texture {
-        if let Some(rect) = fitted_rect_aligned(cell, texture.size(), align) {
+        let rect = if stretch { Some(cell) } else { fitted_rect_aligned(cell, texture.size(), align) };
+        if let Some(rect) = rect {
             painter.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
     } else {

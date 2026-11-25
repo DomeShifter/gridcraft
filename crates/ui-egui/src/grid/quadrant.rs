@@ -126,7 +126,13 @@ pub(crate) fn paint_quadrant(mut quadrant: QuadrantPaint<'_>) {
     paint_cells(&mut quadrant, &looks, &outside, &merges);
     paint_borders(&mut quadrant, &looks, &merges);
     paint_sparklines(&quadrant, range);
+    paint_formula_graphics(&quadrant, &looks);
     paint_filter_buttons(&quadrant, range);
+}
+
+/// SPARKLINE and IMAGE cells (StarSheets 0102).
+fn paint_formula_graphics(q: &QuadrantPaint<'_>, looks: &[(CellRef, Rect, Look, Option<CfLook>)]) {
+    crate::formula_graphics::paint(q.painter, q.workbook, q.sheet_index, q.sheet, looks.iter().map(|(c, r, _, _)| (*c, *r)));
 }
 
 fn visible_merges(q: &QuadrantPaint<'_>, range: RangeRef) -> Vec<RangeRef> {
