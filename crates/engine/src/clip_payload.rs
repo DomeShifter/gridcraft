@@ -72,8 +72,13 @@ fn encode(clip: &Clipboard) -> Option<String> {
     sh.default_row_height = src.default_row_height;
     let spill = src.spill.range(r.start..=r.end).filter(|(c, _)| r.contains(**c)).map(|(c, v)| (*c, v.clone())).collect();
     // Other sheets keep their names (formulas refer to them by name) but nothing else.
-    let sheets =
-        clip.wb.sheets.iter().enumerate().map(|(i, s)| if i == clip.sheet { Arc::new(sh.clone()) } else { Arc::new(Sheet::new(s.name.clone())) }).collect();
+    let sheets = clip
+        .wb
+        .sheets
+        .iter()
+        .enumerate()
+        .map(|(i, s)| if i == clip.sheet { Arc::new(sh.clone()) } else { Arc::new(Sheet::new(s.name.clone())) })
+        .collect();
     let mut wb = Workbook::new();
     wb.sheets = sheets;
     wb.names = clip.wb.names.clone();
