@@ -35,6 +35,11 @@ pub struct Services {
     /// Read the picture on the system clipboard for the ribbon and menu Paste commands when it
     /// holds no text (Cmd/Ctrl+V gets it from egui's `Event::PasteImage`).
     pub paste_image: Option<Box<dyn FnMut() -> Option<image::RgbaImage>>>,
+    /// Web: start an asynchronous read of the system clipboard for the ribbon and menu Paste
+    /// commands. `true` means the host took over: it will hand the text (and HTML) to
+    /// `paste_external` itself when the read finishes, and Paste does nothing now. `false` (or no
+    /// service) pastes as before. Called inside the click, so the read keeps its user gesture.
+    pub paste_start: Option<Box<dyn FnMut() -> bool>>,
     /// Web: deliver a file to the user (name, bytes).
     pub download: Option<Download>,
     /// Web: start an asynchronous file pick; the bytes arrive later in `inbox`.
