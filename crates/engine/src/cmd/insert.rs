@@ -603,6 +603,40 @@ fn table_convert(s: &mut Session, p: &Json) -> Result<Json> {
 
 // ---------------------------------------------------------------- charts
 
+/// The title a new chart gets from the header cells of its range, as in Google Sheets: the series
+/// names joined ("Sales", "Sales and Cost", "Sales, Cost and Tax"), plus " by <header of the
+/// category column>" when the categories have a text header inside the selected block. None when
+/// the range has no headers (an untitled chart, not a placeholder).
+fn derived_chart_title(wb: &Workbook, sheet: usize, at: CellRef, bounds: RangeRef, series: &[Series]) -> Option<String> {
+    let names: Vec<String> = series
+        .iter()
+        .filter_map(|x| x.name.as_ref())
+        .map(|n| gridcraft_calc::evaluate(wb, sheet, at, n).display())
+        .filter(|n| !n.trim().is_empty())
+        .collect();
+    let mut title = match names.as_slice() {
+        [] => return None,
+        [one] => one.clone(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
+    };
+    let header = series.first().and_then(|x| x.categories.as_ref()).and_then(|c| match gridcraft_formula::parse(c) {
+        Ok(gridcraft_formula::Expr::Ref(rf)) => Some(rf.range()),
+        _ => None,
+    });
+    if let Some(cats) = header
+        && cats.start.row > bounds.start.row
+        && cats.start.row > 0
+    {
+        let above = CellRef::new(cats.start.row - 1, cats.start.col);
+        if let Some(h) = wb.sheet(sheet).map(|sh| sh.value(above)).and_then(|v| v.as_text().map(|t| t.trim().to_string()))
+            && !h.is_empty()
+        {
+            title = format!("{title} by {h}");
+        }
+    }
+    Some(title)
+}
+
 pub fn chart_kind(t: &str, sub: &str) -> ChartKind {
     match (t, sub) {
         ("column", "stacked") => ChartKind::ColumnStacked,
@@ -825,13 +859,7 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
     scatter_x_from_first(kind, &mut series);
     let id = d.wb.next_object_id();
     let at = cell_param_on(s, p, "at", sheet)?.unwrap_or_else(|| CellRef::new(bounds.start.row, bounds.end.col + 2));
-    let title = str_param(p, "title").map(str::to_string).or_else(|| {
-        if series.len() == 1 {
-            series[0].name.as_ref().map(|n| gridcraft_calc::evaluate(&d.wb, sheet, at, n).display())
-        } else {
-            Some("Chart Title".into())
-        }
-    });
+    let title = str_param(p, "title").map(str::to_string).or_else(|| derived_chart_title(&d.wb, sheet, at, bounds, &series));
     let chart = Chart {
         id,
         kind,
@@ -1930,6 +1958,26 @@ fn insert_icon(s: &mut Session, p: &Json) -> Result<Json> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_chart_title_comes_from_the_header_cells() {
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", json!({"range": "A1", "values": [["Month", "Sales", "Cost"], ["Jan", 10, 4], ["Feb", 20, 6]]})).unwrap();
+        let title = |s: &mut Session, range: &str| {
+            s.execute("insert.chart", json!({"range": range, "type": "column"})).unwrap();
+            s.active().unwrap().wb.active().unwrap().charts.last().unwrap().title.clone()
+        };
+        assert_eq!(title(&mut s, "A1:B3").as_deref(), Some("Sales by Month"));
+        assert_eq!(title(&mut s, "A1:C3").as_deref(), Some("Sales and Cost by Month"));
+        // No category header inside the block: just the series names.
+        assert_eq!(title(&mut s, "B1:C3").as_deref(), Some("Sales and Cost"));
+        // No headers at all: untitled, not "Chart Title".
+        assert_eq!(title(&mut s, "B2:C3"), None);
+        // An explicit title wins.
+        s.execute("insert.chart", json!({"range": "A1:B3", "title": "Mine"})).unwrap();
+        assert_eq!(s.active().unwrap().wb.active().unwrap().charts.last().unwrap().title.as_deref(), Some("Mine"));
+    }
 
     #[test]
     fn chart_from_whole_columns_uses_the_rows_in_use() {
