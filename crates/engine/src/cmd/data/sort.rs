@@ -109,22 +109,22 @@ fn do_sort(s: &mut Session, sheet: usize, r: RangeRef, header: bool, keys: Vec<S
         let n = if by_cols { body.width() } else { body.height() };
         let line = |i: u32, k: u32| if by_cols { CellRef::new(k, body.start.col + i) } else { CellRef::new(body.start.row + i, k) };
         let theme = cx.wb.theme.clone();
-        let styles = &cx.wb.styles;
-        let key_val = |i: u32, k: &SortKey| -> (Value, u32) {
+        // Colours as the cells show them, conditional formatting included (StarSheets 0100).
+        let wb: &gridcraft_model::Workbook = &cx.wb;
+        let mut shown = super::filter::ShownColors::new(wb, sh);
+        let mut key_val = |i: u32, k: &SortKey| -> (Value, u32) {
             let c = line(i, k.col);
             let v = sh.value(c);
-            let style = styles.get(sh.style_id(c));
+            if k.by == "values" {
+                return (v, 0);
+            }
+            let (fill, font) = shown.of(wb, sh, c);
+            let have = if k.by == "fontColor" { font } else { fill };
             if let Some(want) = &k.first {
-                let have = if k.by == "fontColor" { &style.font.color } else { &style.fill.fg };
-                return (v, u32::from(have != want));
+                return (v, u32::from(have != *want));
             }
             let color = match k.by.as_str() {
-                "cellColor" => {
-                    styles.get(sh.style_id(c)).fill.fg.resolve(&theme).map(|[r, g, b]| u32::from_be_bytes([0, r, g, b])).unwrap_or(u32::MAX)
-                }
-                "fontColor" => {
-                    styles.get(sh.style_id(c)).font.color.resolve(&theme).map(|[r, g, b]| u32::from_be_bytes([0, r, g, b])).unwrap_or(u32::MAX)
-                }
+                "cellColor" | "fontColor" => have.resolve(&theme).map(|[r, g, b]| u32::from_be_bytes([0, r, g, b])).unwrap_or(u32::MAX),
                 _ => 0,
             };
             (v, color)

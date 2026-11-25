@@ -272,6 +272,7 @@ fn hidden_by(wb: &Workbook, sh: &Sheet, af: &AutoFilter) -> Vec<(u32, bool)> {
             col_stats.insert(i, (thr, avg));
         }
     }
+    let mut shown = ShownColors::new(wb, sh);
     for row in r.start.row + 1..=r.end.row {
         let mut visible = true;
         for (i, (off, crit)) in af.criteria.iter().enumerate() {
@@ -313,8 +314,8 @@ fn hidden_by(wb: &Workbook, sh: &Sheet, af: &AutoFilter) -> Vec<(u32, bool)> {
                     }
                     _ => false,
                 },
-                FilterCriterion::FillColor(col) => cell_fill(wb, sh, c) == *col,
-                FilterCriterion::FontColor(col) => wb.styles.get(sh.style_id(c)).font.color == *col,
+                FilterCriterion::FillColor(col) => shown.of(wb, sh, c).0 == *col,
+                FilterCriterion::FontColor(col) => shown.of(wb, sh, c).1 == *col,
                 // Icons are not evaluated here: the row keeps its current visibility.
                 FilterCriterion::Icon { .. } => !sh.rows.get(&row).is_some_and(|i| i.hidden),
             };
@@ -328,9 +329,39 @@ fn hidden_by(wb: &Workbook, sh: &Sheet, af: &AutoFilter) -> Vec<(u32, bool)> {
     hide
 }
 
-/// A cell's fill colour as filters and sorts see it: no fill (`Color::Auto`) unless it has a solid fill.
-fn cell_fill(wb: &Workbook, sh: &Sheet, c: CellRef) -> Color {
-    wb.styles.get(sh.style_id(c)).fill.fg
+/// The colours cells show, for filtering and sorting by colour: a conditional format's fill (or
+/// colour-scale fill) and text colour over the cell's own, as Google Sheets reads them
+/// (StarSheets 0100). Keeps the rules' statistics between cells of one sheet.
+pub struct ShownColors {
+    sheet: Option<usize>,
+    cache: crate::cf::CfCache,
+}
+
+impl ShownColors {
+    pub fn new(wb: &Workbook, sh: &Sheet) -> Self {
+        let sheet = if sh.cond_formats.is_empty() { None } else { wb.sheets.iter().position(|x| std::ptr::eq(&**x, sh)) };
+        ShownColors { sheet, cache: crate::cf::CfCache::new() }
+    }
+
+    /// The fill (`Color::Auto` for none) and the text colour `c` shows.
+    pub fn of(&mut self, wb: &Workbook, sh: &Sheet, c: CellRef) -> (Color, Color) {
+        let style = wb.styles.get(sh.style_id(c));
+        let (mut fill, mut text) = (style.fill.fg, style.font.color);
+        if let Some(look) = self.sheet.and_then(|i| self.cache.look(wb, i, c)) {
+            if let Some(st) = &look.style {
+                if st.fill.pattern != gridcraft_model::PatternType::None {
+                    fill = st.fill.fg;
+                }
+                if st.font.color != Color::Auto {
+                    text = st.font.color;
+                }
+            }
+            if let Some([r, g, b]) = look.scale_fill {
+                fill = Color::Rgb(u32::from_be_bytes([0, r, g, b]));
+            }
+        }
+        (fill, text)
+    }
 }
 
 // ---------------------------------------------------------------- filter views
@@ -475,18 +506,19 @@ pub(super) fn filter_colors_cmd(s: &mut Session, p: &Json) -> Result<Json> {
 }
 
 /// The distinct fill colours (without "no fill") and text colours of column `col` in the data
-/// rows of `range`, in the order they first appear; at most 64 of each.
+/// rows of `range` as they show (conditional formatting included), in the order they first
+/// appear; at most 64 of each.
 pub fn filter_colors(wb: &Workbook, sh: &Sheet, range: RangeRef, col: u32) -> (Vec<Color>, Vec<Color>) {
     const MAX: usize = 64;
     let mut fill: Vec<Color> = Vec::new();
     let mut text: Vec<Color> = Vec::new();
+    let mut shown = ShownColors::new(wb, sh);
     for row in range.start.row + 1..=range.end.row.min(range.start.row + 1_000_000) {
         let c = CellRef::new(row, col);
-        let f = cell_fill(wb, sh, c);
+        let (f, t) = shown.of(wb, sh, c);
         if f != Color::Auto && fill.len() < MAX && !fill.contains(&f) {
             fill.push(f);
         }
-        let t = wb.styles.get(sh.style_id(c)).font.color;
         if text.len() < MAX && !text.contains(&t) {
             text.push(t);
         }

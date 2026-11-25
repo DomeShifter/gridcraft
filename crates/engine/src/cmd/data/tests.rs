@@ -712,3 +712,24 @@ fn filter_and_sort_by_colour() {
     let in_view = s.execute("data.filterColors", json!({"column": "A", "view": 1})).unwrap();
     assert_eq!(in_view["fill"].as_array().unwrap().len(), 2);
 }
+
+#[test]
+fn filter_and_sort_by_colour_read_conditional_formatting() {
+    // StarSheets 0100: colours from conditional formatting count, as in Google Sheets.
+    let mut s = team_sheet();
+    let rule = json!({"type": "cellIs", "operator": "equal", "value": "Red", "style": {"fill": "#FFC7CE", "font": {"color": "#9C0006"}}});
+    s.execute("home.conditionalFormat", json!({"range": "B2:B6", "rule": rule})).unwrap();
+    s.execute("data.filter", json!({"range": "A1:C6"})).unwrap();
+    let colors = s.execute("data.filterColors", json!({"column": "B"})).unwrap();
+    let hexes = |k: &str| colors[k].as_array().unwrap().iter().map(|c| c["hex"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!(hexes("fill"), vec!["#FFC7CE"]);
+    assert_eq!(hexes("text"), vec!["#9C0006", "#000000"]);
+    s.execute("data.filterBy", json!({"column": "B", "fillColor": "#FFC7CE"})).unwrap();
+    assert_eq!(shown_hidden(&s), vec![2, 4, 5]);
+    s.execute("data.filterBy", json!({"column": "B", "clear": true})).unwrap();
+    let key = json!({"column": "B", "by": "fontColor", "color": "#9C0006"});
+    s.execute("data.sort", json!({"range": "A1:C6", "header": true, "keys": [key]})).unwrap();
+    let col_a: Vec<String> =
+        (2..=6).map(|r| s.execute("cell.get", json!({"cell": format!("A{r}")})).unwrap()["text"].as_str().unwrap().to_string()).collect();
+    assert_eq!(col_a, vec!["Ann", "Cy", "Bob", "Di", "Ed"]);
+}
