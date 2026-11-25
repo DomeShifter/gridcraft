@@ -196,7 +196,7 @@ fn a_single_quoted_shape_id_is_dropped_from_the_kept_controls_too() {
     );
     let (wb, report) = read_xlsx(&bytes).unwrap();
     // The minimal package has no styles part; nothing about the control is reported.
-    assert!(report.warnings.iter().all(|w| w == "no styles part"), "{:?}", report.warnings);
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
     let sh = wb.sheet(0).unwrap();
     assert_eq!(sh.controls.len(), 1);
     assert_eq!((sh.controls[0].kind, sh.controls[0].value, sh.controls[0].name.as_str()), (ControlKind::Slider, 40, "Scroll 1"));

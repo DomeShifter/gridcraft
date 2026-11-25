@@ -177,9 +177,9 @@ fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel]) ->
             cx.palette = palette;
             wb.cell_styles = named;
         }
-    } else {
-        cx.warn("no styles part");
     }
+    // No styles part is not a problem: scripted writers (openpyxl write-only, some exporters) leave it
+    // out and Excel opens such a file with the default style, so do we, without a warning.
     Ok(())
 }
 

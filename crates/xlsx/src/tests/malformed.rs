@@ -554,3 +554,19 @@ fn refused_shared_copies_keep_their_values_inside_array_ranges() {
     assert_eq!(s.value(c2), gridcraft_core::Value::Number(7.0));
     assert!(rep.warnings.iter().any(|w| w.contains("longer than")), "{:?}", rep.warnings);
 }
+
+#[test]
+fn missing_styles_part_is_silent() {
+    // Scripted writers (openpyxl write-only, some exporters) leave out xl/styles.xml; Excel opens
+    // that with the default style, so no warning and the values come through.
+    let bytes = minimal(
+        r#"<sheetData><row r="1"><c r="A1"><v>5</v></c><c r="B1" t="inlineStr"><is><t>hi</t></is></c></row></sheetData>"#,
+        &[],
+        "",
+        "",
+    );
+    let (wb, report) = read_xlsx(&bytes).unwrap();
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    let sh = wb.sheet(0).unwrap();
+    assert_eq!(sh.value(gridcraft_core::CellRef::parse("A1").unwrap()), gridcraft_core::Value::Number(5.0));
+}
