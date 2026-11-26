@@ -364,7 +364,8 @@ fn paint_cell(q: &QuadrantPaint<'_>, painted: &(CellRef, Rect, Look, Option<CfLo
         return;
     }
     // Align and clip header text inside the content area, away from the dropdown.
-    let filter_space = sh.filter_button_space(c) * z;
+    // A drop-down cell's ▾ takes its right end too: its text is clipped or wrapped before it, and does not spill past it.
+    let filter_space = sh.filter_button_space(c) * z + dropdown_arrow_space(t, sh, c, rect.height());
     let text_rect = Rect::from_min_max(rect.min, pos2((rect.right() - filter_space).max(rect.left()), rect.bottom()));
     let rect = &text_rect;
     let st = &lk.style;
@@ -635,10 +636,7 @@ fn paint_borders(q: &mut QuadrantPaint<'_>, looks: &[(CellRef, Rect, Look, Optio
             && let Some(dv) = sh.validations.iter().find(|d| d.ranges.iter().any(|r| r.contains(*c)))
         {
             // Plain text shows no ▾ (Sheets' "Plain text" display style).
-            if dv.kind == gridcraft_engine::model::ValidationKind::List
-                && dv.in_cell_dropdown
-                && dv.display != gridcraft_engine::model::DropdownDisplay::Plain
-            {
+            if dropdown_arrow_space(t, sh, *c, rect.height()) > 0.0 {
                 let s = (rect.height() - 4.0).clamp(10.0, 16.0);
                 let r = egui::Rect::from_center_size(pos2(rect.right() - s / 2.0 - 3.0, rect.center().y), egui::vec2(s, s));
                 crate::icons::paint_on_sheet(p, r, crate::icons::Icon::Chevron, Color32::from_rgb(0x5F, 0x63, 0x68));
@@ -679,6 +677,20 @@ fn paint_borders(q: &mut QuadrantPaint<'_>, looks: &[(CellRef, Rect, Look, Optio
             ));
         }
     }
+}
+
+/// The width a drop-down cell keeps free at its right end for its grey ▾ (0 when it shows none):
+/// the arrow, its 3 px margin and 2 px of air. `height` is the cell's drawn height.
+fn dropdown_arrow_space(t: &Tokens, sh: &Sheet, c: CellRef, height: f32) -> f32 {
+    if !t.sheets_marks || sh.show_formulas {
+        return 0.0;
+    }
+    let shows = sh.validations.iter().find(|d| d.ranges.iter().any(|r| r.contains(c))).is_some_and(|dv| {
+        dv.kind == gridcraft_engine::model::ValidationKind::List
+            && dv.in_cell_dropdown
+            && dv.display != gridcraft_engine::model::DropdownDisplay::Plain
+    });
+    if shows { (height - 4.0).clamp(10.0, 16.0) + 5.0 } else { 0.0 }
 }
 
 fn paint_sparklines(q: &QuadrantPaint<'_>, range: RangeRef) {
