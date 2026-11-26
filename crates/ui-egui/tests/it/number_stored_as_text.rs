@@ -3,6 +3,7 @@
 use egui_kittest::kittest::Queryable as _;
 use gridcraft_engine::Session;
 use gridcraft_ui_egui::SheetApp;
+use gridcraft_ui_egui::theme::Tokens;
 use serde_json::json;
 
 type Harness = egui_kittest::Harness<'static, SheetApp>;
@@ -20,6 +21,12 @@ fn harness_with(active: &str, sheets_marks: bool) -> Harness {
     let mut h = crate::common::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
         |ui, app: &mut SheetApp| {
             let ctx = ui.ctx().clone();
+            if sheets_marks {
+                let (mut light, mut dark) = (Tokens::light(), Tokens::dark());
+                light.sheets_marks = true;
+                dark.sheets_marks = true;
+                Tokens::install(&ctx, light, dark);
+            }
             app.logic(&ctx);
             app.ui(ui);
         },
