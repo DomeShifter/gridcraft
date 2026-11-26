@@ -8,6 +8,10 @@ use serde_json::json;
 type Harness = egui_kittest::Harness<'static, SheetApp>;
 
 fn harness(active: &str) -> Harness {
+    harness_with(active, false)
+}
+
+fn harness_with(active: &str, sheets_marks: bool) -> Harness {
     let mut s = Session::new();
     s.new_workbook();
     s.execute("cell.set", json!({"cell": "B2", "input": "'123"})).unwrap();
@@ -41,4 +45,14 @@ fn the_warning_button_converts_a_number_stored_as_text() {
 fn text_that_is_not_a_number_gets_no_button() {
     let h = harness("B3");
     assert!(h.query_by_label("Error checking options").is_none());
+}
+
+#[test]
+fn with_sheets_marks_a_number_stored_as_text_gets_no_warning_button() {
+    let mut h = harness_with("B2", true);
+    h.run_steps(2);
+    assert!(h.query_by_label("Error checking options").is_none());
+    // The data is untouched: the cell still holds text.
+    let v = h.state_mut().session.execute("cell.get", json!({"cell": "B2"})).unwrap()["value"].clone();
+    assert_eq!(v, json!("123"));
 }

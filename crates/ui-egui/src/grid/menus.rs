@@ -767,6 +767,10 @@ pub(super) fn error_check_tag(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, 
     if app.editor.is_some() || app.dialog.is_some() || sh.show_formulas || app.grid.drag != Drag::None {
         return;
     }
+    // Google Sheets has no such warning (host option `sheets_marks`).
+    if Tokens::get(ui.ctx()).sheets_marks {
+        return;
+    }
     let Some(active) = app.session.active().map(|d| d.selection.active) else { return };
     if sh.cell(active).and_then(gridcraft_engine::cmd::formulas::number_stored_as_text).is_none() {
         return;
