@@ -19,7 +19,7 @@ fn harness_with(active: &str, sheets_marks: bool) -> Harness {
     s.execute("cell.set", json!({"cell": "B3", "input": "'abc"})).unwrap();
     s.execute("selection.set", json!({"cell": active})).unwrap();
     let mut h = crate::common::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
-        |ui, app: &mut SheetApp| {
+        move |ui, app: &mut SheetApp| {
             let ctx = ui.ctx().clone();
             if sheets_marks {
                 let (mut light, mut dark) = (Tokens::light(), Tokens::dark());
