@@ -8,6 +8,7 @@ use egui::{Color32, Key, Sense, Stroke, StrokeKind, vec2};
 
 use crate::icons::{self, Icon};
 use gridcraft_engine::core::{CellRef, RangeRef};
+use gridcraft_engine::model::sheet::{NEW_SHEET_COL_WIDTH, NEW_SHEET_ROW_HEIGHT};
 use serde_json::{Map, Value as Json, json};
 
 use crate::SheetApp;
@@ -322,20 +323,24 @@ impl Dialog {
                 }],
                 json!({"shift": "up"}),
             ),
-            "rowHeight" => Dialog::form(
-                "rowHeight",
-                "Row Height",
-                "home.rowHeight",
-                vec![Number { key: "points", label: "Row height (points):" }],
-                json!({"points": app.session.active().and_then(|d| d.wb.active().map(|s| s.row_height(d.selection.active.row) as f64 * 0.75)).unwrap_or(15.0)}),
-            ),
-            "columnWidth" => Dialog::form(
-                "columnWidth",
-                "Column Width",
-                "home.columnWidth",
-                vec![Number { key: "chars", label: "Column width (characters):" }],
-                json!({"chars": app.session.active().and_then(|d| d.wb.active().map(|s| gridcraft_engine::cmd::format::points_to_chars(s.col_width(d.selection.active.col) as f64))).unwrap_or(8.43)}),
-            ),
+            "rowHeight" => {
+                let height = app.session.active().and_then(|d| d.wb.active().map(|s| f64::from(s.row_height(d.selection.active.row))));
+                let (key, label, value) = if app.ui.sheets_keys {
+                    ("height", "Row height (pixels):", height.unwrap_or(f64::from(NEW_SHEET_ROW_HEIGHT)))
+                } else {
+                    ("points", "Row height (points):", height.map_or(15.0, |h| h * 0.75))
+                };
+                Dialog::form("rowHeight", "Row Height", "home.rowHeight", vec![Number { key, label }], json!({(key): value}))
+            }
+            "columnWidth" => {
+                let width = app.session.active().and_then(|d| d.wb.active().map(|s| f64::from(s.col_width(d.selection.active.col))));
+                let (key, label, value) = if app.ui.sheets_keys {
+                    ("width", "Column width (pixels):", width.unwrap_or(f64::from(NEW_SHEET_COL_WIDTH)))
+                } else {
+                    ("chars", "Column width (characters):", width.map_or(8.43, gridcraft_engine::cmd::format::points_to_chars))
+                };
+                Dialog::form("columnWidth", "Column Width", "home.columnWidth", vec![Number { key, label }], json!({(key): value}))
+            }
             "defaultWidth" => Dialog::form(
                 "defaultWidth",
                 "Standard Width",
@@ -1139,6 +1144,39 @@ impl Dialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resize_dialogs_use_pixels_in_sheets_and_excel_units_in_gridcraft() {
+        let mut session = gridcraft_engine::Session::default();
+        session.new_workbook();
+        let mut app = SheetApp::new(session, Default::default());
+        app.run("home.rowHeight", json!({"height": 35})).unwrap();
+        app.run("home.columnWidth", json!({"width": 107})).unwrap();
+        app.ui.sheets_keys = true;
+
+        for (name, key, label, before, after) in [
+            ("rowHeight", "height", "Row height (pixels):", 35.0, 37.0),
+            ("columnWidth", "width", "Column width (pixels):", 107.0, 113.0),
+        ] {
+            let mut dialog = Dialog::open(&mut app, name, json!({})).unwrap();
+            assert_eq!(dialog.fields, [Field::Number { key, label }]);
+            assert_eq!(dialog.values[key].as_f64(), Some(before));
+            dialog.set_value(key, json!(after));
+            app.run(dialog.command.unwrap(), build_params(&dialog)).unwrap();
+        }
+
+        let sheet = app.session.active().unwrap().wb.active().unwrap();
+        assert_eq!(sheet.row_height(0), 37.0);
+        assert_eq!(sheet.col_width(0), 113.0);
+
+        app.ui.sheets_keys = false;
+        let row = Dialog::open(&mut app, "rowHeight", json!({})).unwrap();
+        assert_eq!(row.fields, [Field::Number { key: "points", label: "Row height (points):" }]);
+        assert_eq!(row.values["points"].as_f64(), Some(37.0 * 0.75));
+        let col = Dialog::open(&mut app, "columnWidth", json!({})).unwrap();
+        assert_eq!(col.fields, [Field::Number { key: "chars", label: "Column width (characters):" }]);
+        assert_eq!(col.values["chars"].as_f64(), Some(gridcraft_engine::cmd::format::points_to_chars(113.0)));
+    }
 
     #[test]
     fn remove_duplicates_prefills_the_selection_and_submits_the_edited_range() {
