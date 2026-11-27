@@ -766,6 +766,32 @@ fn a_sized_grid_shrinks_grows_and_round_trips() {
 }
 
 #[test]
+fn inserting_after_the_last_lines_grows_the_sized_grid() {
+    let mut s = s();
+    let size = |s: &Session| {
+        let sheet = s.doc().unwrap().wb.active().unwrap();
+        (sheet.row_count(), sheet.col_count())
+    };
+    s.execute("home.deleteRows", json!({"rows": "51:1000"})).unwrap();
+    s.execute("home.deleteColumns", json!({"cols": "F:Z"})).unwrap();
+    s.execute("cell.set", json!({"cell": "E50", "input": "42"})).unwrap();
+    assert_eq!(size(&s), (50, 5));
+
+    // The Insert below and Insert right actions on the final two rows and columns.
+    s.execute("home.insertRows", json!({"rows": "51:52"})).unwrap();
+    assert_eq!(size(&s), (52, 5));
+    s.execute("home.insertColumns", json!({"cols": "F:G"})).unwrap();
+    assert_eq!(size(&s), (52, 7));
+    assert_eq!(v(&s, "E50"), Value::Number(42.0));
+    assert_eq!(v(&s, "G52"), Value::Empty);
+
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(size(&s), (52, 5));
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(size(&s), (50, 5));
+}
+
+#[test]
 fn deleting_a_multi_area_row_selection_removes_every_area_and_undoes_once() {
     let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2], [3], [4], [5], [6]]})).unwrap();

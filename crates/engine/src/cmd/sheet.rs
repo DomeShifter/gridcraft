@@ -338,10 +338,11 @@ fn insert_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
             shift_sheet_features(sh, axis, at, count, true);
             // New lines take the format of the line before (Excel's "Format Same As Above").
             inherit_line_format(sh, axis, at, count);
-            // A sized grid (Google Sheets) gets longer; Excel's full grid pushes lines off its end.
+            // A sized grid grows when inserting within it or right at its end.
+            // Excel's full grid pushes lines off its end.
             let grid = if axis == Axis::Rows { &mut sh.grid_rows } else { &mut sh.grid_cols };
             if let Some(n) = grid.as_mut()
-                && at < *n
+                && at <= *n
             {
                 *n = n.saturating_add(count).min(limit);
             }
